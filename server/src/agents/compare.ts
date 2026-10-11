@@ -121,9 +121,10 @@ export function quoteSupports(kind: Kind, value: unknown, quote: string): boolea
       return roundType(q) === roundType(String(value));
     case 'person': {
       // Every person named in the value must appear in the quote.
-      const q = words(quote);
+      // Compare without spaces: page text often glues a name to the next word ("SaarinenCo-founder").
+      const q = words(quote).join('');
       const names = people(String(value));
-      return names.length > 0 && names.every((n) => q.includes(surname(n)));
+      return names.length > 0 && names.every((n) => surname(n).length > 1 && q.includes(surname(n)));
     }
     case 'place': {
       const qw = new Set(words(quote));
