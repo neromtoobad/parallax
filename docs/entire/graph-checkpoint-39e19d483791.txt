@@ -1,0 +1,12 @@
+Semantic changes e751c562300549c38b8afe78574bf78f4b54e1a1..a974ed961cc286ef07f96f880547264f671b59a9
+
+docs/business-plan.md (Markdown)
+  + section Parallax:-business-plan-cfo.ai added
+  + section Results-before-hiring added
+  + section What-it-says added
+  + section Gross-margin-sensitivity-Base-mix-after-payment-fees added
+  + section Assumptions-and-limits added
+
+hackathon.md (Markdown)
+  ~ module hackathon.md body changed (0 dependents)
+

@@ -1,0 +1,13 @@
+repo: /Users/mac/Documents/Hacks/parallax (gh/neromtoobad/parallax)
+freshness: degraded — worktree=dirty-unindexed (semantic index is based on committed HEAD)
+semantic: 76 files, 923 symbols, 2477 relations
+boundaries: routes=4 tools=0 workflows=0
+commands:
+  npm run build: next build
+  npm run dev (server/package.json): node --env-file-if-exists=../.env --watch src/main.ts
+  npm run dev (web/package.json): next dev -p 5180
+  npm run job: node --env-file-if-exists=../.env scripts/job.ts
+  npm run start (server/package.json): node --env-file-if-exists=../.env src/main.ts
+  npm run start (web/package.json): next start -p ${PORT:-5180}
+  npm run typecheck: tsc --noEmit
+key documents: AGENTS.md, CLAUDE.md, README.md, docs/business-plan-brief.md, docs/business-plan.md, docs/unit-economics.md

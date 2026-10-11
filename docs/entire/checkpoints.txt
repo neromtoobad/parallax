@@ -1,0 +1,18 @@
+  branch       main
+  checkpoints  5
+
+● b45c78da2c30  "yes make a share link and push"
+  10-11 10:35 (982d5ab) Link the view-only cfo.ai model in the plan and build log
+
+● 39e19d483791  "signed in to cfoai, go ahead"
+  10-11 10:26 (a974ed9) cfo.ai business plan: 24-month model with three scenarios, runway, hiring and...
+
+● f1f6ace133ea  "push it"
+  10-11 10:05 (e751c56) Business plan brief: v4 unit costs for all seven services, per-service pricin...
+
+● dee865b380e4  Build log: free page reads (v3), five new services, UI ov...
+  10-11 10:01 (5b79d03) Build log: free page reads (v3), five new services, UI overhaul, v1→v4 eval
+
+● 758532752575  "Research for the neatHack AI agent hackathon (neatlogs.co..."
+  10-11 10:00 (b45b169) Entire: redact emails and phone numbers in captured sessions
+

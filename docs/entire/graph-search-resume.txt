@@ -1,0 +1,99 @@
+LOW CONFIDENCE: top score 35.1 and ranks 1 and 2 are tied (0.0100 apart) - the ranking did not choose. This repo may not contain what you asked for; verify before editing.
+1. server/src/context.ts:69-112 score=35.1475 symbol=step kind=function focus=69 signals=path,body,symbol-name,signature,graph:callers,complete-symbol
+export async function step<T>(
+  job: Job,
+  agent: AgentId,
+  key: string,
+  fn: () => Promise<T>,
+  opts: { retries?: number; goal?: string } = {},
+): Promise<T> {
+  const done = job.steps[key];
+  if (done?.status === 'done') return done.output as T;
+
+  const retries = opts.retries ?? 2;
+  const startedAt = Date.now();
+  const before = job.spend.totalUsd;
+  let attempts = 0;
+  let lastErr: unknown;
+
+  const traced = span({ kind: 'AGENT', name: `${agent}.${key.split(':')[0]}`, role: agent, goal: opts.goal ?? key }, async (_key: string) => {
+    for (;;) {
+      attempts++;
+      try {
+        return await fn();
+      } catch (err) {
+        lastErr = err;
+        if (err instanceof BudgetExceeded || err instanceof Permanent || attempts > retries) throw err;
+        const wait = 800 * 2 ** (attempts - 1);
+        emit(job, { agent, kind: 'retry', text: `${key} failed (${short(err)}), retrying in ${wait / 1000}s`, data: { attempt: attempts } });
+        await sleep(wait);
+      }
+    }
+  });
+
+  return asAgent(job, agent, async () => {
+    try {
+      const output = await traced(key);
+      job.steps[key] = { key, agent, status: 'done', output, attempts, startedAt, endedAt: Date.now(), costUsd: job.spend.totalUsd - before };
+      saveJob(job);
+      return output;
+    } catch (err) {
+      job.steps[key] = { key, agent, status: 'failed', error: short(err), attempts, startedAt, endedAt: Date.now(), costUsd: job.spend.totalUsd - before };
+      saveJob(job);
+      throw lastErr ?? err;
+    }
+  });
+}
+
+2. server/src/store.ts:16-25 score=35.1375 symbol=saveJob kind=function focus=16 signals=graph:calls,graph:outgoing,graph:callers,complete-symbol
+export function saveJob(job: Job) {
+  job.updatedAt = Date.now();
+  if (job.status === 'running') job.lease = { pid: process.pid, host: hostname(), at: Date.now() };
+  const file = join(jobsDir, `${job.id}.json`);
+  // Write then rename, so a crash mid-write never leaves a half-written checkpoint.
+  writeFileSync(file + '.tmp', JSON.stringify(job, null, 2));
+  renameSync(file + '.tmp', file);
+  cache.set(job.id, { job, mtime: statSync(file).mtimeMs });
+  bus.emit('job', job);
+}
+
+3. server/src/runner.ts:39-64 score=32.1237 symbol=createJob kind=function focus=62 signals=path,body,symbol-name,symbol-usage,complete-symbol
+export function createJob(service: ServiceId, raw: Record<string, any>, opts: { client?: Job['client']; tag?: string } = {}) {
+  const svc = CATALOG.find((s) => s.id === service);
+  if (!svc) return null;
+  const input = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, typeof v === 'string' ? v.trim().slice(0, 500) : v]));
+  if (input.count != null) input.count = Math.max(1, Math.min(25, Number(input.count) || 10));
+  const brief = svc.fields.map((f) => (input[f.name] ? `${f.label} ${input[f.name]}` : '')).filter(Boolean).join('\n');
+  if (!brief) return null;
+  const job: Job = {
+    id: newId('job'),
+    service,
+    brief,
+    input,
+    client: opts.client,
+    status: 'quoted',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    steps: {},
+    spend: emptySpend(),
+    traces: [],
+    runs: 0,
+    tag: opts.tag,
+  };
+  job.quote = quote(job);
+  saveJob(job);
+  return job;
+}
+
+4. server/src/api.ts:37-41 focus=39
+  if (!job) return c.json({ error: 'not found' }, 404);
+  if (job.status !== 'quoted') return c.json({ error: `job is ${job.status}` }, 409);
+  void runJob(job.id);
+  return c.json(view(job));
+});
+
+5. server/src/runner.ts:70 runJob  [body: def runJob]
+VERIFY: none derivable (no build manifest found) - syntax-check the file you edited and stop.
+  targets server/src/context.ts (from no manifest, no test file, no single-file checker for this language) tier=none
+RELATED SITES (the same change usually also lands here):
+6. server/src/context.ts:53 symbol=say (sibling)

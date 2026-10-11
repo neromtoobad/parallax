@@ -16,7 +16,7 @@
 - Models: neatHack LiteLLM gateway (claude-haiku, claude-sonnet-4.6, nova models)
 - Tools: Crustdata APIs (company search/enrich, person search, web search, web fetch)
 - neatlogs: traces for every job, agent step, tool call and model call
-- Entire: checkpoints on every commit (branch `entire/checkpoints/v1`), entire-graph for code context
+- Entire: checkpoints (branch `entire/checkpoints/v1`), entire-graph for code structure, Entire Brain for repo memory. Evidence: `docs/entire/`
 - cfo.ai: business plan (pricing, costs, revenue, runway) from measured unit economics
 
 ## Build log
@@ -27,7 +27,7 @@
 - Created the repo. Enabled Entire (Claude Code hooks, branch checkpoints) and entire-graph (`entire graph init-agents`).
 - Wrote the agent core (server/): checkpointed steps, CFO quotes and budget caps, the two-angle company brief and lead list, and neatlogs spans. Typechecks; it has not run against live APIs yet because the keys aren't in.
 - Followed Entire's neatHack guide (hack.entire.io/neathacks-2026): installed Entire Brain (`entire brain init-agents`, `entire brain setup`, which indexed 24 files and 257 symbols) and added the brain MCP server in `.mcp.json`.
-- The first build session started outside the repo, before Entire's hooks existed, so it wasn't captured. That transcript also includes unrelated private notes, so it was not attached as a public checkpoint. The build continues in a fresh session opened in the repo, so every prompt and commit from here on is captured.
+- The first build session started outside the repo, before Entire's hooks existed, so it wasn't captured. That transcript also includes unrelated private notes, so it was not attached as a public checkpoint. The build was meant to continue in a session opened inside the repo. *Correction, added later the same day:* the sessions behind the 07:15–09:52 commits were also started from the parent folder, so they weren't captured either (see "Entire evidence" below).
 
 - First live job (company brief on Linear): it failed on a Crustdata 400 (a field name the API rejected), was fixed, then resumed from its checkpoint and delivered.
   - On the way it repaired a malformed model reply, and the Verifier rejected a web quote it could not find on the page, falling back to the database value.
@@ -136,6 +136,23 @@ Trace IDs for every row are in `server/evals/v1-vs-v2.md`.
 - In v4 the Nigerian fintech list delivered 5/5 from 21 candidates (trace `1b553ddf3ffa5a0ce2a1478c4d25f320`), against 2/5 in v3. Between v3 and v4 the lead-list code only moved into shared helpers (plus de-duplicating candidates), so some of that swing is run-to-run variance on a hard case. Two lead lists is a small sample.
 - Brief cost fell from $0.201 to $0.155 with the same gold-fact accuracy. "Facts seen from both angles" dipped from 90% to 80%.
 
+### Entire evidence (`docs/entire/`)
+
+- **Checkpoints.**
+  - 5 checkpoints on `main` and 13 commits on `entire/checkpoints/v1`.
+  - 4 captured sessions. Three are sub-agent sessions, attached at checkpoint `758532752575`: the background research and the build of the five newer services, about 28.6M tokens.
+  - PII redaction (emails, phones) is on.
+- **Gap, found while gathering this evidence.** The commits from 07:15 to 09:52 have no checkpoints. Their sessions were started from `~/Documents/Hacks`, not from inside the repo, so Entire's hooks never fired. Every session since 10:00 runs inside the repo and is captured. The rule is now a durable fact in the Brain.
+- **Graph.** 76 files, 923 symbols, 2,476 relations.
+  - A plain-English search ("resume a job from its last saved step after the server restarts") returns `step()`, `saveJob()` and `runJob()`, the real recovery path.
+  - `impact` on `step()` shows all 7 service runners depend on it.
+  - `commit` and `checkpoint` give entity-level diffs of the five-services commit and the business-plan checkpoint.
+- **Graph usage, honestly.** `graph stats` counts 8 graph calls against 132 grep/find/read calls in the captured sessions. Discovery mostly went through grep; the graph was used for impact and change analysis.
+- **Brain.**
+  - The index was refreshed to HEAD, and its daemon re-indexes every 5 minutes.
+  - Three durable facts were recorded and recalled: the session capture rule, the free-first page reads, and the CFO pricing rule.
+  - The agent guides tell every coding agent to start with `entire brain brief`.
+
 ## Demo
 
 Pending.
@@ -146,10 +163,10 @@ Pending.
 
 ## Submission
 
-- [ ] Public repo with commits dated Oct 10–12
+- [x] Public repo with commits dated Oct 10–12: github.com/neromtoobad/parallax (public; all commits Oct 11)
 - [ ] Demo video, 3 min max, covering neatlogs, Entire and cfo.ai
 - [ ] neatlogs traces: a before/after pair with numbers, and a recovery run
-- [ ] Entire checkpoints / entire-graph output
+- [x] Entire checkpoints / entire-graph output: `docs/entire/` (gap: 07:15–09:52 commits uncaptured, explained there)
 - [x] cfo.ai business plan (pricing, costs, revenue, runway): `docs/business-plan.md`, live model at https://cfo.ai/s/otTA-690Qi0JrZV0
 - [ ] Building-in-public posts tagged #neatHack
 - [ ] Quote-post the official neatlogs submission post (window: Oct 12, 7:00–11:55 PM IST)

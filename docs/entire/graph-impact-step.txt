@@ -1,0 +1,32 @@
+Index: cache-hit (116ms) | Query: 1ms | Total: 117ms
+Impact: step (server/src/context.ts:69) def=69 span=69-112 [function]
+Blast radius: 7 callers (7 direct, 0 transitive), 7 callees, 4 type consumers, 3 data flows, 0 co-change files, 0 siblings.
+Callers (7 direct, 0 transitive; who breaks if behavior changes):
+- runCompanyBrief (server/src/services/company-brief.ts:42) [ASYNC_CALLS]
+- runCompetitorTeardown (server/src/services/competitor-teardown.ts:43) [ASYNC_CALLS]
+- runLeadList (server/src/services/lead-list.ts:28) [ASYNC_CALLS]
+- runMarketMap (server/src/services/market-map.ts:23) [ASYNC_CALLS]
+- runPeopleMap (server/src/services/people-map.ts:33) [ASYNC_CALLS]
+- runPersonCheck (server/src/services/person-check.ts:33) [ASYNC_CALLS]
+- runVendorCheck (server/src/services/vendor-check.ts:33) [ASYNC_CALLS]
+Callees (7; what it depends on):
+- neatlogs.span
+- asAgent (server/src/context.ts:58)
+- sleep (server/src/context.ts:62) [ASYNC_CALLS]
+- sleep (server/src/context.ts:62)
+- short (server/src/context.ts:114)
+- saveJob (server/src/store.ts:16)
+- emit (server/src/store.ts:46)
+Type consumers (0 in, 4 out; USES_TYPE/PARAM_TYPE/RETURNS_TYPE):
+- -> AgentId (server/src/types.ts:5) [PARAM_TYPE]
+- -> AgentId (server/src/types.ts:5) [USES_TYPE]
+- -> Job (server/src/types.ts:116) [PARAM_TYPE]
+- -> Job (server/src/types.ts:116) [USES_TYPE]
+Data flows (1 in, 2 out):
+- <- asAgent (server/src/context.ts:58)
+- -> saveJob (server/src/store.ts:16)
+- -> emit (server/src/store.ts:46)
+Co-change coupling (0; files that historically change with server/src/context.ts):
+- none
+Same-container siblings (0):
+- none

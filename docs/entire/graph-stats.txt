@@ -1,0 +1,33 @@
+entire graph stats
+  repo:     /Users/mac/Documents/Hacks/parallax
+  sessions: /Users/mac/.claude/projects/-Users-mac-Documents-Hacks-parallax
+  window:   --since 30d · 4 session(s), 4 transcript file(s)
+  covering: 2026-10-11T05:58:18Z → 2026-10-11T09:42:29Z
+
+graph calls: 9 · exploration calls: 132 · graph-first rate: 0% (0/4 sessions)
+
+graph calls by verb
+  verb                      calls    est. tokens
+  impact                        3            526
+  search                        2          3,208
+  stats                         2            553
+  commit                        1            235
+  help                          1            462
+  TOTAL                         9          4,985
+
+exploration calls (what the graph is meant to replace)
+  kind                      calls    est. tokens
+  Bash grep/find/read         132        113,992
+  TOTAL                       132        113,992
+
+session tokens (billed, read from transcript usage)
+  input 502 · cache write 878,726 · cache read 47,133,286 · output 83,542 · total 48,096,056
+
+ESTIMATED SAVINGS  ~2,646 tokens  (~0.01% of billed session tokens)
+  credited graph calls: 4 of 9 (search/neighbors/impact only)
+  Model (assumption, not a measurement): each graph locate call (search/neighbors/impact)
+  is credited with the ONE whole-file read it replaced. Counterfactual = on-disk size of
+  the top-hit file that call pointed at (the repo's median tracked-file size when the path
+  cannot be resolved), minus the bytes the graph call actually returned, floored at 0,
+  converted at 4 bytes = 1 token. Real savings depend on what you would actually have read
+  instead; treat this as an estimate, not ground truth.

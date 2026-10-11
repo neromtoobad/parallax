@@ -1,0 +1,22 @@
+Semantic changes f9081f47e56461d44f4a1f05bc03377309b96c38..36bd7cb
+
+CLAUDE.md (Markdown)
+  ~ module CLAUDE.md body changed (0 dependents)
+
+server/src/crust.ts (TypeScript)
+  + variable companiesByDomain added
+
+server/src/services/competitor-teardown.ts (TypeScript)
+  ~ interface Intake body changed (7 dependents)
+  + field Intake.known added
+  ~ function runCompetitorTeardown body changed (0 dependents)
+  ~ function readOffer body changed (1 dependent)
+  ~ function verify body changed (5 dependents)
+  + function pricesOnPage added
+
+server/src/services/shared.ts (TypeScript)
+  ~ function resolveCompany body changed (3 dependents)
+  + function byDomain added
+  ~ function personOnWeb body changed (4 dependents)
+  ~ function writeAudited body changed (2 dependents)
+

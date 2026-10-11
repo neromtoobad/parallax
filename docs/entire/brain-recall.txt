@@ -1,0 +1,4 @@
+fact:01e2cf78a711c48cb9a201ea decision [architecture.pricing.rule]
+  The CFO agent quotes from the 75th percentile cost of the last 12 delivered jobs of a service at a 75% target margin, and keeps the starting estimate as a floor until a service has 3 jobs of history.
+fact:04273375d2c822212ce8250a convention [workflow.capture.rule]
+  Agent sessions must be started with the working directory inside this repo; sessions started from the parent folder (~/Documents/Hacks) don't fire Entire's hooks, so their commits get no checkpoints (the Oct 11 07:15-09:52 commits have none).
