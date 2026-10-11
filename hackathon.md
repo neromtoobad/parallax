@@ -79,6 +79,57 @@ Trace IDs for every row are in `server/evals/v1-vs-v2.md`.
 - `server/scripts/unit-economics.ts` → `docs/unit-economics.md`: measured cost per brief and per lead from delivered jobs. Data is about 90% of the cost; models 6–13%.
 - `docs/business-plan-brief.md`: pricing, assumptions, scenarios and the prompt for cfo.ai (Ari). cfo.ai's MCP server is in `.mcp.json`.
 
+### Cheaper page reads (v3)
+
+- Data is about 90% of the cost, so Parallax now reads pages with its own fetch first (free) and pays Crustdata only for pages that come back blocked or empty (`readPages` in `crust.ts`).
+- Lead candidates whose domain doesn't resolve are skipped with a free DNS lookup before any page is paid for. The database still lists companies that are gone.
+- Sharper candidate screening: law firms, foundations and accelerators are dropped too, and a company that *is* the kind of company asked for counts as a fit.
+- Eval v3 (`server/evals/v2-vs-v3.md`): briefs saw 90% of facts from both angles (up from 82%), still 14/14 gold facts right. The lead lists got worse: 7/10 delivered. The Nigerian fintech list checked 26 candidates to verify 2 (trace `91f92175d4f0081f1a4d8cbe4fbdf102`).
+- `docs/unit-economics.md` refreshed from 18 delivered jobs (v2, v3 and live tests).
+
+### Five more services, three departments
+
+- The catalog grew from 2 services to 7, grouped by department. Each one was run live with `scripts/try.ts` before it was committed:
+  - **Sales:** `company-brief`, `lead-list`, `people-map`
+  - **Market:** `competitor-teardown`, `market-map`
+  - **Trust:** `vendor-check` (green/amber/red), `person-check`
+- The new services return one generic `Deliverable` shape, and the code they share lives in `services/shared.ts`: candidate screening, checking a person on the open web, title ranking.
+- Fixes found by running them:
+  - "Former" flags now apply only to the person being checked.
+  - Short company names get exact lookups.
+  - Pricing checks need a quote from the page.
+  - An empty web search is retried.
+  - The CFO's quote has a floor for services with no cost history yet.
+- Company briefs now fall back to a paid, rendered fetch when the free fetch gets a thin JavaScript shell (under 1,500 characters of text).
+
+### UI overhaul
+
+- **Observatory.** An illustrated scene where the 7 agents act out the real job events as they stream in (idle, work, talk, done). All art was generated for this project with Higgsfield, about 18 credits; the log is in `assets/art/CREDITS.md`.
+- **Home:** a live replay of a real job, services by department, the team and proof numbers from the evals.
+- **Hire:** the form, with the CFO's quote.
+- **Job page:**
+  - The subject is the title, with a one-line answer under it.
+  - Results show "why" as a sentence, and internal flags are hidden.
+  - A slim money and activity sidebar.
+  - Saved steps and trace IDs are folded under "Under the hood".
+- **Books:** client revenue is kept separate from test and eval runs. It covers every service.
+
+### Eval v1 → v4 (same 9 fixed jobs; `server/evals/v1-vs-v4.md`)
+
+| metric | v1 | v2 | v3 | v4 |
+| --- | --- | --- | --- | --- |
+| facts seen from both angles | 45% | 82% | 90% | 80% |
+| gold facts right / wrong | 14/14, 0 | 14/14, 0 | 14/14, 0 | 14/14, 0 |
+| brief points with guesswork | 39% | 0% | 0% | 0% |
+| avg cost per brief | $0.167 | $0.189 | $0.201 | **$0.155** |
+| leads delivered / wanted | 9/10 | 10/10 | 7/10 | **10/10** |
+| candidates checked per lead | 6.9 | 2.0 | 4.6 | 2.8 |
+| cost per delivered lead | $0.123 | $0.072 | $0.137 | **$0.068** |
+| avg seconds per lead list | 231 | 113 | 178 | 141 |
+
+- In v4 the Nigerian fintech list delivered 5/5 from 21 candidates (trace `1b553ddf3ffa5a0ce2a1478c4d25f320`), against 2/5 in v3. Between v3 and v4 the lead-list code only moved into shared helpers (plus de-duplicating candidates), so some of that swing is run-to-run variance on a hard case. Two lead lists is a small sample.
+- Brief cost fell from $0.201 to $0.155 with the same gold-fact accuracy. "Facts seen from both angles" dipped from 90% to 80%.
+
 ## Demo
 
 Pending.
