@@ -54,7 +54,8 @@ api.post('/jobs/:id/approve', (c) => {
   return job ? c.json(view(job)) : c.json({ error: 'job is not paused' }, 409);
 });
 
-api.get('/jobs', (c) => c.json(listJobs().slice(0, 100).map(summary)));
+// A quote nobody accepted isn't a job yet.
+api.get('/jobs', (c) => c.json(listJobs().filter((j) => j.status !== 'quoted').slice(0, 100).map(summary)));
 
 api.get('/jobs/:id', (c) => {
   const job = getJob(c.req.param('id'));
