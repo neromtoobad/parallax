@@ -27,16 +27,18 @@ const q = (xs: number[], p: number) => {
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 
 const out: any = { generatedAt: new Date().toISOString(), tags, services: {} };
-for (const service of ['company-brief', 'lead-list']) {
+const order = ['company-brief', 'lead-list', 'people-map', 'competitor-teardown', 'market-map', 'vendor-check', 'person-check'];
+for (const service of order) {
   const js = jobs.filter((j) => j.service === service);
   if (!js.length) continue;
-  const units = (j: any) => (service === 'lead-list' ? Math.max(1, j.result?.stats?.verified ?? 0) : 1);
+  // Lead lists are paid per verified lead, market maps per company mapped; everything else per job.
+  const units = (j: any) => (service === 'lead-list' ? Math.max(1, j.result?.stats?.verified ?? 0) : service === 'market-map' ? Math.max(1, Number(j.input?.count ?? 10)) : 1);
   const perUnit = js.map((j) => j.spend.totalUsd / units(j));
   const llmShare = mean(js.map((j) => j.spend.llmUsd / Math.max(1e-9, j.spend.totalUsd)));
   const secs = js.map((j) => (j.updatedAt - j.createdAt) / 1000);
   out.services[service] = {
     jobs: js.length,
-    unit: service === 'lead-list' ? 'delivered lead' : 'brief',
+    unit: service === 'lead-list' ? 'delivered lead' : service === 'company-brief' ? 'brief' : service === 'market-map' ? 'company mapped' : 'job',
     costPerUnit: { mean: mean(perUnit), p50: q(perUnit, 0.5), p75: q(perUnit, 0.75), max: Math.max(...perUnit) },
     split: { models: llmShare, data: 1 - llmShare },
     creditsPerUnit: mean(js.map((j) => j.spend.credits / units(j))),

@@ -1,63 +1,193 @@
 {
-  "generatedAt": "2026-10-11T08:05:51.646Z",
+  "generatedAt": "2026-10-11T09:04:54.255Z",
   "tags": [
-    "eval:v2",
-    "eval:v3",
-    "live-test"
+    "eval:v4",
+    "dev"
   ],
   "services": {
     "company-brief": {
-      "jobs": 14,
+      "jobs": 9,
       "unit": "brief",
       "costPerUnit": {
-        "mean": 0.1937286428571429,
-        "p50": 0.20122800000000002,
-        "p75": 0.207721,
-        "max": 0.22018300000000002
+        "mean": 0.1548482222222222,
+        "p50": 0.150097,
+        "p75": 0.161029,
+        "max": 0.21419900000000003
       },
       "split": {
-        "models": 0.15012085634543523,
-        "data": 0.8498791436545647
+        "models": 0.20547171288968535,
+        "data": 0.7945282871103146
       },
-      "creditsPerUnit": 16.454285714285714,
-      "modelCallsPerJob": 6.357142857142857,
-      "dataCallsPerJob": 12.785714285714286,
+      "creditsPerUnit": 12.316666666666666,
+      "modelCallsPerJob": 6.444444444444445,
+      "dataCallsPerJob": 10.777777777777779,
       "secondsPerJob": {
-        "p50": 416.183,
-        "p75": 464.809
+        "p50": 118.3,
+        "p75": 149.04
       },
       "partialDeliveries": 0,
       "sampleTraces": [
-        "e308fba56daba1a0662c99d12686885a",
-        "b50981c33c06a71018c76723d7cb81e6",
-        "207ba28a0af0718035b0803ea0bc453f"
+        "313af6c8df2b296df7483c325d04f2ea",
+        "49fb7dc8c4bf5885c65998960ffff81a",
+        "022fa43ff15de6348d842cfd630f983f"
       ]
     },
     "lead-list": {
-      "jobs": 4,
+      "jobs": 2,
       "unit": "delivered lead",
       "costPerUnit": {
-        "mean": 0.14250880000000007,
-        "p50": 0.11578940000000004,
-        "p75": 0.3478180000000002,
-        "max": 0.3478180000000002
+        "mean": 0.06792870000000002,
+        "p50": 0.09639020000000004,
+        "p75": 0.09639020000000004,
+        "max": 0.09639020000000004
       },
       "split": {
-        "models": 0.057157336682297374,
-        "data": 0.9428426633177026
+        "models": 0.08405746679220619,
+        "data": 0.9159425332077938
       },
-      "creditsPerUnit": 13.496,
-      "modelCallsPerJob": 13.5,
-      "dataCallsPerJob": 30.5,
+      "creditsPerUnit": 6.237,
+      "modelCallsPerJob": 15.5,
+      "dataCallsPerJob": 20,
       "secondsPerJob": {
-        "p50": 397.491,
-        "p75": 430.306
+        "p50": 227.826,
+        "p75": 227.826
       },
-      "partialDeliveries": 1,
+      "partialDeliveries": 0,
       "sampleTraces": [
-        "b4406f831223aa36a49be0051e3f0f51",
-        "e715da87ea1a7c9f605c64da63efcdd3",
-        "face1492bd7dd177a80565dfc01fc9aa"
+        "56823b1fcf32ca9a9bf65e04be63b5d5",
+        "1b553ddf3ffa5a0ce2a1478c4d25f320"
+      ]
+    },
+    "people-map": {
+      "jobs": 3,
+      "unit": "job",
+      "costPerUnit": {
+        "mean": 0.10897366666666665,
+        "p50": 0.11206099999999998,
+        "p75": 0.11412099999999999,
+        "max": 0.11412099999999999
+      },
+      "split": {
+        "models": 0.08387571881280209,
+        "data": 0.9161242811871979
+      },
+      "creditsPerUnit": 9.983333333333334,
+      "modelCallsPerJob": 3,
+      "dataCallsPerJob": 11.333333333333334,
+      "secondsPerJob": {
+        "p50": 80.475,
+        "p75": 94.63
+      },
+      "partialDeliveries": 0,
+      "sampleTraces": [
+        "27a758a542c429e563281c0c313eee21",
+        "69c0b07264f0096f09cc6a092d1fc280",
+        "b069edc0336443e6f64afcea93a2f6ad"
+      ]
+    },
+    "competitor-teardown": {
+      "jobs": 4,
+      "unit": "job",
+      "costPerUnit": {
+        "mean": 0.18465225,
+        "p50": 0.18405,
+        "p75": 0.248535,
+        "max": 0.248535
+      },
+      "split": {
+        "models": 0.2828884001583753,
+        "data": 0.7171115998416246
+      },
+      "creditsPerUnit": 13.5375,
+      "modelCallsPerJob": 8.75,
+      "dataCallsPerJob": 4.75,
+      "secondsPerJob": {
+        "p50": 78.405,
+        "p75": 82.867
+      },
+      "partialDeliveries": 0,
+      "sampleTraces": [
+        "b25b9108d5daf1f761ae560ca176dc2a",
+        "7fdc47f663eb42601270681c6b036435",
+        "17380a2d9e511811765009fe18bb83e1"
+      ]
+    },
+    "market-map": {
+      "jobs": 1,
+      "unit": "company mapped",
+      "costPerUnit": {
+        "mean": 0.0213484,
+        "p50": 0.0213484,
+        "p75": 0.0213484,
+        "max": 0.0213484
+      },
+      "split": {
+        "models": 0.1259298120702254,
+        "data": 0.8740701879297745
+      },
+      "creditsPerUnit": 1.866,
+      "modelCallsPerJob": 8,
+      "dataCallsPerJob": 3,
+      "secondsPerJob": {
+        "p50": 27.638,
+        "p75": 27.638
+      },
+      "partialDeliveries": 0,
+      "sampleTraces": [
+        "3ef9709828be0ca75140f88efc08990b"
+      ]
+    },
+    "vendor-check": {
+      "jobs": 3,
+      "unit": "job",
+      "costPerUnit": {
+        "mean": 0.03517433333333333,
+        "p50": 0.01189,
+        "p75": 0.081743,
+        "max": 0.081743
+      },
+      "split": {
+        "models": 0.04161600299716081,
+        "data": 0.9583839970028392
+      },
+      "creditsPerUnit": 3.3299999999999996,
+      "modelCallsPerJob": 1.3333333333333333,
+      "dataCallsPerJob": 3,
+      "secondsPerJob": {
+        "p50": 32.895,
+        "p75": 80.857
+      },
+      "partialDeliveries": 0,
+      "sampleTraces": [
+        "9029f76861fe55203727b58d5768d003",
+        "4c490efe0c1014718692338dc1af1c96",
+        "23c2cd3bccc33d06886a3ace2e8c40d4"
+      ]
+    },
+    "person-check": {
+      "jobs": 2,
+      "unit": "job",
+      "costPerUnit": {
+        "mean": 0.0349145,
+        "p50": 0.046069,
+        "p75": 0.046069,
+        "max": 0.046069
+      },
+      "split": {
+        "models": 0.06044525292284089,
+        "data": 0.9395547470771591
+      },
+      "creditsPerUnit": 3.3049999999999997,
+      "modelCallsPerJob": 2,
+      "dataCallsPerJob": 4,
+      "secondsPerJob": {
+        "p50": 29.197,
+        "p75": 29.197
+      },
+      "partialDeliveries": 0,
+      "sampleTraces": [
+        "c168cd164ee939d372c9e1fa07a25477",
+        "c555673b5d5003e3af12246e6a531f30"
       ]
     }
   }
