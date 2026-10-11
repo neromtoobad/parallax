@@ -1,0 +1,10 @@
+Research for the neatHack AI agent hackathon (neatlogs.com/hackathon, Oct 10–12 2026, one track "Build an agent that works (literally)": an agent that completes a substantial task start to finish; judged: agent 30%, use of neatlogs/Entire/cfo.ai 25%, demo video 20%, building in public 15%, usefulness/originality 10%; $2k/$1k/$500 cash + Dodo Payments credits; community winner $500). Today is Oct 11 2026. Load tools via ToolSearch "select:WebFetch,WebSearch" (and the Exa search MCP if it is available) and do web research. Do not post, sign up or submit anything.
+
+Find and report with URLs:
+1. What other participants are building: search X/Twitter and the web for "#neatHack", "neatHack", "neatlogs hackathon" posts from Oct 2026 (build-in-public posts, project names, ideas). List as many distinct projects as you can find with one-line descriptions, and flag any that are an "AI CFO", finance/bookkeeping/invoice/payments agent, or "AI company/agency that does jobs" (the user's past project Syncly was an AI agency whose AI CFO runs the money and pays agents per job in USDC).
+2. The official neatlogs submission post on X (the one participants must quote-tweet), and neatlogs/cfo.ai/Entire X accounts' hackathon posts — anything about what judges look for, kickoff call notes, workshop topics (TheVibeFounder surprise workshop).
+3. The Luma page luma.com/s5blr882 — full details and any rules not on the main site.
+4. Sponsors: what cfo.ai actually is (product, positioning — is it itself an "AI CFO"? who are the founders, what does it output), Dodo Payments (merchant-of-record payments API — does it have test mode, usage-based billing, an agent/MCP toolkit, India/Nigeria availability?), Crustdata (company/people data API useful for agents), Orchestrator.inc (what is it? judge Prateek Karnal is its founder), TheVibeFounder.
+5. The judges' interests: Haimantika Mitra & Abhi Singh (Entire), Prateek Karnal (Orchestrator.inc), Ajay Yadav & Akshay Hangloo (neatlogs) — any recent posts about what they think makes a good agent.
+
+Return a compact brief (under 900 words), factual, with links. Clearly separate verified facts from inferences.
