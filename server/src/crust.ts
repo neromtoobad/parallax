@@ -75,9 +75,13 @@ export const COMPANY_FIELDS = [
   'locations.country',
 ];
 
-export const companySearch = tool('crustdata.company_search', async (q: { query: string; country?: string; limit?: number; cursor?: string }) => {
+export const companySearch = tool('crustdata.company_search', async (q: { query: string; country?: string; minStaff?: number | null; maxStaff?: number | null; limit?: number; cursor?: string }) => {
   const body: any = { search: { query: q.query, mode: 'hybrid' }, fields: COMPANY_FIELDS, limit: q.limit ?? 10 };
-  if (q.country) body.filters = { field: 'locations.country', type: 'in', value: countryNames(q.country) };
+  const conds: any[] = [];
+  if (q.country) conds.push({ field: 'locations.country', type: 'in', value: countryNames(q.country) });
+  if (q.minStaff) conds.push({ field: 'headcount.total', type: '=>', value: Math.floor(q.minStaff * 0.8) });
+  if (q.maxStaff) conds.push({ field: 'headcount.total', type: '=<', value: Math.ceil(q.maxStaff * 1.25) });
+  if (conds.length) body.filters = conds.length === 1 ? conds[0] : { op: 'and', conditions: conds };
   if (q.cursor) body.cursor = q.cursor;
   return call<{ companies: any[]; next_cursor: string | null }>('/company/search', body, 0.5);
 });
@@ -146,10 +150,10 @@ export const webSearch = tool('crustdata.web_search', async (query: string, sour
   return (res.results ?? []).slice(0, 8);
 });
 
-export const webFetch = tool('crustdata.web_fetch', async (urls: string[]) => {
+export const webFetch = tool('crustdata.web_fetch', async (urls: string[], humanMode = false) => {
   const res = await call<{ success: boolean; url: string | null; title: string | null; content: string | null }[]>(
     '/web/enrich/live',
-    { urls: urls.slice(0, 10) },
+    { urls: urls.slice(0, 10), ...(humanMode ? { human_mode: true } : {}) },
     urls.length,
   );
   return res.map((r, i) => ({ url: r.url ?? urls[i], ok: r.success && !!r.content, title: r.title ?? '', text: r.content ? htmlToText(r.content) : '' }));

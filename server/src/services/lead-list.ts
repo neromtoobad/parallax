@@ -18,6 +18,8 @@ interface Intake {
   titles: string[];
   count: number;
   exclude: string[];
+  headcountMin: number | null;
+  headcountMax: number | null;
 }
 
 const BROAD_TITLES = ['Founder', 'CEO', 'Head of', 'VP', 'Director'];
@@ -26,8 +28,8 @@ export async function runLeadList(job: Job) {
   const intake = await step(job, 'lead', 'intake', () =>
     json<Intake>({
       system:
-        "You are the Lead at a research agency. Turn a client's lead-list request into a work order: a one-line description of the companies to find (for a semantic company search), a country filter if the client named one (full English name like \"United States\", else null), 2-4 job titles of the person to contact (short forms that appear in titles, like \"Head of Sales\" or \"CTO\"), how many leads, and any company domains to exclude.",
-      user: `Client brief: ${job.brief}\nForm fields: ${JSON.stringify(job.input)}\n\nReturn {"icp": string, "country": string|null, "titles": string[], "count": number, "exclude": string[]}`,
+        "You are the Lead at a research agency. Turn a client's lead-list request into a work order: a one-line description of the companies to find (for a semantic company search), a country filter if the client named one (full English name like \"United States\", else null), 2-4 job titles of the person to contact (short forms that appear in titles, like \"Head of Sales\" or \"CTO\"), how many leads, any company domains to exclude, and an employee-count range if the client gave one (else null).",
+      user: `Client brief: ${job.brief}\nForm fields: ${JSON.stringify(job.input)}\n\nReturn {"icp": string, "country": string|null, "titles": string[], "count": number, "exclude": string[], "headcountMin": number|null, "headcountMax": number|null}`,
       check: (v) => (!v?.icp ? 'icp required' : !Array.isArray(v.titles) || !v.titles.length ? 'titles must be a non-empty array' : null),
     }),
   );
@@ -46,7 +48,7 @@ export async function runLeadList(job: Job) {
     for (let page = 1; page <= 4 && leads.filter((l) => l.status === 'verified').length < want; page++) {
       const batch = await step(job, 'records', `source:${page}`, async () => {
         say(`Searching the company database (page ${page})`, 'tool');
-        const r = await companySearch({ query: intake.icp, country: intake.country ?? undefined, limit: Math.min(40, want * 2 + 4), cursor: cursor ?? undefined });
+        const r = await companySearch({ query: intake.icp, country: intake.country ?? undefined, minStaff: intake.headcountMin, maxStaff: intake.headcountMax, limit: Math.min(40, want * 3 + 6), cursor: cursor ?? undefined });
         return {
           next: r.next_cursor,
           companies: (r.companies ?? []).map((c: any) => ({
@@ -63,11 +65,27 @@ export async function runLeadList(job: Job) {
       fresh.forEach((c: any) => seen.add(c.domain));
       if (!fresh.length && !cursor) break;
 
+      // Screen on the database descriptions first (one cheap model call for the whole page), so
+      // credits go only on companies worth checking. Field still has to confirm each one on its own site.
+      const screened = await step(job, 'lead', `screen:${page}`, async () => {
+        const inRange = fresh.filter((c: any) => c.headcount == null || ((intake.headcountMin == null || c.headcount >= intake.headcountMin * 0.8) && (intake.headcountMax == null || c.headcount <= intake.headcountMax * 1.25)));
+        if (inRange.length < fresh.length) say(`${fresh.length - inRange.length} companies outside the ${intake.headcountMin ?? 0}-${intake.headcountMax ?? '∞'} employee range`, 'step');
+        if (!inRange.length) return [];
+        const r = await json<{ keep: { i: number; why: string }[] }>({
+          system: "Screen companies for a client's ideal customer profile using their database descriptions. Keep only clear fits, best first. Drop agencies, consultancies, freelancers and companies whose description doesn't show the fit.",
+          user: `Ideal customer: ${intake.icp}\nCandidates:\n${inRange.map((c: any, i: number) => `${i}. ${c.name} (${c.domain}), ${c.headcount ?? '?'} staff, ${c.country ?? '?'}: ${(c.description ?? '').slice(0, 220)}`).join('\n')}\n\nReturn {"keep": [{"i": number, "why": string}]}`,
+          check: (v) => (!Array.isArray(v?.keep) ? 'keep must be an array' : null),
+        });
+        const kept = r.keep.filter((k) => inRange[k.i]).map((k) => inRange[k.i]);
+        say(`Screened ${inRange.length} candidates on their database profiles; ${kept.length} worth checking`, 'step');
+        return kept;
+      });
+
       // Three at a time: fast, and well inside Crustdata's per-minute limits.
-      for (let i = 0; i < fresh.length; i += 3) {
+      for (let i = 0; i < screened.length; i += 3) {
         const verified = leads.filter((l) => l.status === 'verified').length;
         if (verified >= want) break;
-        const group = fresh.slice(i, i + Math.min(3, want - verified));
+        const group = screened.slice(i, i + Math.min(3, want - verified));
         const done = await Promise.all(group.map((c: any) => step(job, 'field', `check:${c.domain}`, () => checkLead(intake, c), { retries: 1 }).catch((e) => {
           if (e instanceof BudgetExceeded) throw e;
           return { company: c, fit: '', checks: [{ name: 'checked', ok: false, note: String(e.message ?? e).slice(0, 120) }], status: 'dropped', dropReason: 'check failed after retries' } as Lead;
@@ -121,7 +139,11 @@ async function checkLead(intake: Intake, c: { name: string; domain: string; desc
 
   // Field angle 1: does the company's own site say it fits?
   say(`Reading ${c.domain}`, 'tool');
-  const [site] = await webFetch([`https://${c.domain}`]);
+  let [site] = await webFetch([`https://${c.domain}`]);
+  if (!site?.ok) {
+    say(`${c.domain} didn't load; retrying as a browser`, 'recover');
+    [site] = await webFetch([`https://www.${c.domain}`], true);
+  }
   checks.push({ name: 'site is live', ok: !!site?.ok, note: site?.ok ? site.title.slice(0, 80) : 'could not load the homepage' });
   if (!site?.ok) return drop('website did not load');
 
