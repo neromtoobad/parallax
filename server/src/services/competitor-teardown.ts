@@ -1,11 +1,11 @@
 import { BudgetExceeded, say, step } from '../context.ts';
-import { companySearch, directFetch, readPages, usablePage } from '../crust.ts';
+import { companiesByDomain, companySearch, directFetch, readPages, usablePage } from '../crust.ts';
 import { env } from '../env.ts';
 import { json } from '../llm.ts';
 import { quoteOnPage } from '../agents/compare.ts';
 import { emit } from '../store.ts';
 import type { Check, Deliverable, Item, Job } from '../types.ts';
-import { canon, companyRow, looksLikeDomain, money, quotedOnPage, resolveCompany, RICH_FIELDS, screen, toCsv, writeAudited, type CompanyRow } from './shared.ts';
+import { canon, clean, companyRow, escape, looksLikeDomain, money, quotedOnPage, resolveCompany, RICH_FIELDS, screen, toCsv, writeAudited, type CompanyRow } from './shared.ts';
 
 /**
  * Competitor teardown: who the client competes with and how each one sells itself. Records finds
@@ -18,6 +18,7 @@ interface Intake {
   domain: string | null;
   focus: string;
   local: boolean;
+  known: { name: string; domain: string }[];
 }
 
 interface Offer {
@@ -43,9 +44,9 @@ export async function runCompetitorTeardown(job: Job): Promise<Deliverable> {
   const intake = await step(job, 'lead', 'intake', () =>
     json<Intake>({
       system:
-        'You are the Lead at a research agency. A client wants a competitor teardown. Extract the company to tear down against (and its domain if given, else null), what the client cares about most (focus), and whether competitors should come from the same country (local=true only for businesses that compete locally, like banks, payments, retail, services).',
-      user: `Client brief: ${job.brief}\nForm fields: ${JSON.stringify(job.input)}\n\nReturn {"name": string, "domain": string|null, "focus": string, "local": boolean}`,
-      check: (v) => (!v?.name ? 'missing name' : typeof v.local !== 'boolean' ? 'local must be boolean' : null),
+        'You are the Lead at a research agency. A client wants a competitor teardown. Extract the company to tear down against (and its domain if given, else null), what the client cares about most (focus), whether competitors should come from the same country (local=true only for businesses that compete locally, like banks, payments, retail, services), and up to 6 direct competitors you know of, as company names with their main website domains (the database will check each one exists).',
+      user: `Client brief: ${job.brief}\nForm fields: ${JSON.stringify(job.input)}\n\nReturn {"name": string, "domain": string|null, "focus": string, "local": boolean, "known": [{"name", "domain"}]}`,
+      check: (v) => (!v?.name ? 'missing name' : typeof v.local !== 'boolean' ? 'local must be boolean' : !Array.isArray(v.known) ? 'known must be an array' : null),
     }),
   );
   if (!job.plan) {
@@ -64,24 +65,35 @@ export async function runCompetitorTeardown(job: Job): Promise<Deliverable> {
   const client = await step(job, 'field', 'client', () => readOffer(name, company.domain, intake.focus));
 
   // Records: companies that describe themselves like the client does.
+  // Records: the rivals the Lead named, if the database has them, plus companies that describe themselves like the client.
   const rivals = await step(job, 'records', 'rivals', async () => {
-    const about = company.description || client.positioning?.value || name;
-    say(`Searching the company database for businesses like ${name}${intake.local && company.country ? ` in ${company.country}` : ''}`, 'tool');
-    // Buyers shortlist companies of some weight; one-person startups crowd a semantic search otherwise.
-    const minStaff = Math.max(15, Math.round((company.headcount ?? 150) * 0.1));
-    const r = await companySearch({ query: about.slice(0, 400), mode: 'semantic', country: intake.local && company.country ? company.country : undefined, minStaff, limit: 25, fields: RICH_FIELDS });
     const brand = name.toLowerCase().split(/\s+/)[0];
-    const list = (r.companies ?? []).map(companyRow).filter((c) => c.domain && c.domain !== company.domain && !c.name.toLowerCase().startsWith(brand));
-    say(`Records proposed ${list.length} candidates`);
-    return list;
+    const known = [...new Set((intake.known ?? []).map((k) => clean(k.domain)).filter((d): d is string => !!d && d !== company.domain))].slice(0, 6);
+    let named: CompanyRow[] = [];
+    if (known.length) {
+      say(`Checking the ${known.length} competitors the Lead named against the company database`, 'tool');
+      // Several records can share a domain (old pages, regional arms); keep the biggest one per domain.
+      const rows = ((await companiesByDomain(known, RICH_FIELDS)).companies ?? []).map(companyRow).filter((c) => c.domain);
+      named = known.map((d) => rows.filter((c) => c.domain === d).sort((a, b) => (b.headcount ?? 0) - (a.headcount ?? 0))[0]).filter((c): c is CompanyRow => !!c);
+      say(`${named.length} of ${known.length} are in the database${named.length < known.length ? `; ${known.filter((d) => !named.some((n) => n.domain === d)).join(', ')} not found` : ''}`);
+    }
+    // The company's own name in the query pulls in lookalike names ("Linea", "LINE"); search on what it does.
+    const about = (company.description || client.positioning?.value || name).replace(new RegExp(`\\b${escape(name)}\\b`, 'gi'), '').slice(0, 400);
+    say(`Searching the company database for businesses like ${name}${intake.local && company.country ? ` in ${company.country}` : ''}`, 'tool');
+    const r = await companySearch({ query: about, mode: 'semantic', country: intake.local && company.country ? company.country : undefined, limit: 15, fields: RICH_FIELDS });
+    const found = (r.companies ?? []).map(companyRow).filter((c) => c.domain && c.domain !== company.domain && !c.name.toLowerCase().startsWith(brand) && !named.some((n) => n.domain === c.domain));
+    say(`Records proposed ${named.length + found.length} candidates`);
+    return [...named, ...found];
   });
 
   const picked = await step(job, 'lead', 'screen', async () => {
+    // Buyers shortlist companies of some weight; one-person startups crowd a semantic search otherwise.
+    const minStaff = Math.max(10, Math.round((company.headcount ?? 100) * 0.05));
     const kept = await screen(
       `Direct competitors of ${name} (${company.domain}): ${(company.description || client.positioning?.value || '').slice(0, 300)}`,
       rivals,
-      undefined,
-      `Keep only direct competitors: companies whose product a buyer would weigh against ${name}'s. Best first. Drop the company itself, its subsidiaries, agencies, consultancies, resellers, investors, and companies in a different product category.`,
+      { min: minStaff, max: null },
+      `Keep only direct competitors: companies whose product a buyer would weigh against ${name}'s. Best first: the ones buyers most often shortlist. Drop the company itself, its subsidiaries, agencies, consultancies, resellers, investors, and companies in a different product category.`,
     );
     return kept.slice(0, WANT + 1);
   });
@@ -124,7 +136,7 @@ export async function runCompetitorTeardown(job: Job): Promise<Deliverable> {
     writeAudited({
       model: env.models.smart,
       system:
-        'You write a competitor teardown for a client. Use ONLY the facts given; each has a key. Write 4-6 points. Each point starts with "Differs:" (how the client stands apart) or "Exposed:" (where a competitor is stronger or the client is open to attack), states the facts plainly, and ends with one concrete thing the client can do about it. Cite every fact key a point relies on. No hedging words ("likely", "probably", "may", "might", "could", "suggests", "seems", "potentially"). Do not add numbers, names or prices that are not in the cited facts.',
+        'You write a competitor teardown for a client. Use ONLY the facts given; each has a key. Write 4-6 points. Each point starts with "Differs:" (how the client stands apart) or "Exposed:" (where a competitor is stronger or the client is open to attack), states the facts plainly, and ends with one concrete thing the client can do about it. Cite every fact key a point relies on (in cites, not in the text). A fact that is missing is unknown: never claim the client or a competitor lacks something unless a fact says so, and never describe a company (\"legacy\", \"retrofitted\", \"bloated\") beyond what its facts say. No hedging words ("likely", "probably", "may", "might", "could", "suggests", "seems", "potentially"). Do not add numbers, names or prices that are not in the cited facts.',
       user: `Client: ${name} (key prefix C0)\nFocus: ${intake.focus}\nFacts:\n${Object.entries(values).map(([k, v]) => `[${k}] ${v}`).join('\n')}`,
       values,
     }),
@@ -172,7 +184,10 @@ async function readOffer(name: string, domain: string, focus: string): Promise<O
     const page = pages[r.page] ?? pages.H;
     const onPage = quotedOnPage(r.quote, page.text, quoteOnPage);
     const says = !isPrice || priceSays(String(r.value), r.quote);
-    return { value: String(r.value).slice(0, 200), quote: r.quote.slice(0, 240), source: page.url, verified: onPage && says, note: !onPage ? 'quote not found on the page' : !says ? "quote doesn't state the price" : 'quote found on the page' };
+    // Pricing tables come back as cells with feature lists between them, so a stitched quote rarely matches
+    // word for word. Then every price in the value must itself be printed on the page as a price.
+    const prices = isPrice && !(onPage && says) && pricesOnPage(String(r.value), page.text);
+    return { value: String(r.value).slice(0, 200), quote: r.quote.slice(0, 240), source: page.url, verified: (onPage && says) || prices, note: onPage && says ? 'quote found on the page' : prices ? 'every price in it is printed on the page' : !onPage ? 'quote not found on the page' : "quote doesn't state the price" };
   };
   return { site: true, url: site.url, pricingUrl: pricingPage?.url ?? null, positioning: verify(out.positioning), target: verify(out.target), pricing: verify(out.pricing, true) };
 }
@@ -184,6 +199,13 @@ function priceSays(value: string, quote: string) {
   if (!want.length) return true; // "Free" or "contact sales": nothing numeric to check beyond the quote itself
   const have = new Set(nums(quote));
   return want.some((n) => have.has(n));
+}
+
+function pricesOnPage(value: string, page: string) {
+  const want = [...value.replace(/,/g, '').matchAll(/\d+(?:\.\d+)?/g)].map((m) => m[0]).filter((n) => parseFloat(n) > 0 && !/^(19|20)\d\d$/.test(n));
+  if (!want.length) return false;
+  const text = page.replace(/,/g, '');
+  return want.every((n) => new RegExp(`[$€£]\\s?${n.replace('.', '\\.')}(?![\\d.])|\\b${n.replace('.', '\\.')}\\s?(?:usd|eur|gbp|\\/|per\\b)`, 'i').test(text));
 }
 
 interface Raw {

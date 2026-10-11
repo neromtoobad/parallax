@@ -1,6 +1,6 @@
 import { resolve4, resolve6 } from 'node:dns/promises';
 import { BudgetExceeded, say } from '../context.ts';
-import { companyEnrich, companySearch, COMPANY_FIELDS, FUNDING_FIELDS, webSearch, type WebResult } from '../crust.ts';
+import { companiesByDomain, companyEnrich, companySearch, COMPANY_FIELDS, FUNDING_FIELDS, webSearch, type WebResult } from '../crust.ts';
 import { json } from '../llm.ts';
 
 /** Helpers shared by the services: company lookups, screening, people on the web, writer audits. */
@@ -148,11 +148,9 @@ export async function resolveCompany(name: string, domain: string | null, brief:
   const exact = d && list.find((c) => c.domain === d);
   if (exact) return exact;
   if (d) {
-    // The search ranks by words, so a well-known domain can miss; the enrich endpoint looks the domain up directly.
-    const e = await companyEnrich(d).catch((err) => (err instanceof BudgetExceeded ? Promise.reject(err) : null));
-    const row = e ? companyRow(e) : null;
+    const row = await byDomain(d);
     if (row) say(`Found ${row.name} by its domain`);
-    return row ? { ...row, domain: row.domain || d } : { name, domain: d, description: '', headcount: null, country: null, founded: null, hq: null, fundingUsd: null, lastRound: null };
+    return row ?? { name, domain: d, description: '', headcount: null, country: null, founded: null, hq: null, fundingUsd: null, lastRound: null };
   }
   const choice = list.length
     ? await json<{ index: number; reason: string }>({
@@ -171,10 +169,21 @@ export async function resolveCompany(name: string, domain: string | null, brief:
   const brand = name.toLowerCase().replace(/[^a-z0-9]/g, '');
   const site = web.map((r) => clean(r.url)).find((h) => h && !SOCIAL.test(h) && h.replace(/[^a-z0-9]/g, '').includes(brand.slice(0, 12)));
   if (!site) throw new Error(`could not tell which "${name}" the client means`);
-  const again = (await companySearch({ query: `${name} ${site}`, limit: 5, fields: RICH_FIELDS })).companies?.map(companyRow) ?? [];
-  const hit = again.find((c) => c.domain === site);
+  const hit = await byDomain(site);
   say(`The web points to ${site}${hit ? `; matched ${hit.name} in the database` : ''}`);
   return hit ?? { name, domain: site, description: '', headcount: null, country: null, founded: null, hq: null, fundingUsd: null, lastRound: null };
+}
+
+/**
+ * The search ranks by words, so a known domain can miss. Look it up exactly (several records can
+ * share a domain: keep the biggest), then fall back to enrich, which costs more.
+ */
+async function byDomain(d: string): Promise<CompanyRow | null> {
+  const rows = ((await companiesByDomain([d], RICH_FIELDS)).companies ?? []).map(companyRow).filter((c) => c.domain === d);
+  const best = rows.sort((a, b) => (b.headcount ?? 0) - (a.headcount ?? 0))[0];
+  if (best) return best;
+  const e = await companyEnrich(d).catch((err) => (err instanceof BudgetExceeded ? Promise.reject(err) : null));
+  return e ? { ...companyRow(e), domain: d } : null;
 }
 
 const SOCIAL = /linkedin\.com|facebook\.com|instagram\.com|(^|\.)x\.com|twitter\.com|youtube\.com|wikipedia\.org|crunchbase\.com|tiktok\.com|github\.com/i;
@@ -219,7 +228,8 @@ export async function personOnWeb(name: string, company: string, prefetched?: We
   const last = name.split(/\s+/).pop()!.toLowerCase();
   const brand = company.toLowerCase().split(/\s+/)[0];
   const mentions = hits.filter((h) => `${h.title} ${h.snippet}`.toLowerCase().includes(last) && `${h.title} ${h.snippet} ${h.url}`.toLowerCase().includes(brand));
-  const left = mentions.find((h) => leftSignal(`${h.title} ${h.snippet}`, brand)) ?? null;
+  // Posts and lists name several people; "ex-Paystack" must sit in the same piece of text as this person.
+  const left = mentions.find((h) => `${h.title} | ${h.snippet}`.split(/\s(?:\.\.\.|…)\s|[|·•\n]/).some((seg) => seg.toLowerCase().includes(last) && leftSignal(seg, brand))) ?? null;
   return { hits, mentions, left };
 }
 
@@ -286,6 +296,8 @@ export async function writeAudited(o: { model?: string; system: string; user: st
       user: `${o.user}${problems ? `\n\nYour last draft was rejected:\n${problems}` : ''}\n\nReturn {"points": [{"text", "cites": [keys]}]}`,
       check: (v) => (!Array.isArray(v?.points) || !v.points.length ? 'points must be a non-empty array' : null),
     });
+    // Models like to repeat the keys at the end of the text ("... [C0.positioning]"); the cites carry them.
+    for (const p of draft.points) p.text = p.text.replace(/\s*\[[\w.,\s-]+\]\s*$/, '').trim();
     const issues = auditPoints(draft.points, o.values);
     if (!issues.length) return { points: draft.points, rounds: round + 1 };
     problems = issues.join('\n');

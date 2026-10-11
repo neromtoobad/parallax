@@ -8,7 +8,7 @@ Build log and submission checklist: `hackathon.md` (keep it updated after each w
 - `server/` — Hono API on Node 24, `.ts` run directly (no build). `npm run dev` from `server/` (port 8787, reads `../.env`).
 - A **job** = one neatlogs `WORKFLOW` trace (`runner.ts`). Each unit of work is a checkpointed `step()` (`context.ts`): saved to `data/jobs/<id>.json`, skipped on resume, retried with backoff, traced as an `AGENT` span. Crustdata calls are `TOOL` spans (`crust.ts`); model calls go through `wrapOpenAI` (`llm.ts`).
 - Agents: Lead (intake/plan), CFO (`agents/cfo.ts`: quote from past cost per unit, hard budget, books), Records (Crustdata database), Field (Crustdata web search + fetch), Arbiter (conflict tiebreak), Verifier (quote-on-page + value checks, plain code in `agents/compare.ts`), Writer.
-- Services: `services/company-brief.ts`, `services/lead-list.ts`.
+- Services (`catalog.ts`, each with a `dept`): sales = `company-brief`, `lead-list`, `people-map`; market = `competitor-teardown`, `market-map`; trust = `vendor-check`, `person-check`. Newer services return the generic `Deliverable` shape (`types.ts`); shared helpers live in `services/shared.ts`. Try one live: `node --env-file=../.env scripts/try.ts <service> '<json>'` (or `--resume <jobId>`).
 - Spend is charged per call (`charge()`); `assertBudget()` stops a job at its cap → status `paused`, resumable via `/api/jobs/:id/approve`.
 - Fault injection for recovery demos: `PARALLAX_CHAOS="crust:0.3,llm-json:0.3"`.
 

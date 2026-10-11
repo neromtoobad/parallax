@@ -88,6 +88,11 @@ export const companySearch = tool('crustdata.company_search', async (q: { query:
   return call<{ companies: any[]; next_cursor: string | null }>('/company/search', body, 0.5);
 });
 
+/** Exact lookup of known domains: one filter-only search, billed only for what it finds. */
+export const companiesByDomain = tool('crustdata.company_search', async (domains: string[], fields: string[] = COMPANY_FIELDS) =>
+  call<{ companies: any[] }>('/company/search', { filters: { field: 'basic_info.primary_domain', type: 'in', value: domains }, fields, limit: Math.min(100, domains.length * 2) }, 0.5),
+);
+
 /** The database spells countries several ways ("United States", "USA", ...); match them all. */
 const COUNTRY_ALIASES: string[][] = [
   ['United States', 'USA', 'United States of America', 'US'],
