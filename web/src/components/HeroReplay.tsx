@@ -64,7 +64,7 @@ export function HeroReplay() {
 
   return (
     <div>
-      <Studio states={states} tags />
+      <Studio states={states} />
       <div style={{ display: 'flex', justifyContent: 'center', marginTop: 10 }}>
         <span className="pill live" style={{ background: '#fff', border: '1px solid var(--line)' }}>
           <span className="dot" style={{ color: 'var(--agree)' }} />

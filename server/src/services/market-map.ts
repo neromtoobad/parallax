@@ -33,7 +33,8 @@ export async function runMarketMap(job: Job): Promise<Deliverable> {
   const country = intake.country ?? (job.input.country ? String(job.input.country) : null);
   if (!job.plan) {
     job.plan = { ...intake, country, count: want };
-    say(`Work order: map ${want} companies in ${intake.space}${country ? ` (${country})` : ''}`, 'step');
+    // Outside any step there's no agent context, so say() would drop this; emit it as the Lead.
+    emit(job, { agent: 'lead', kind: 'step', text: `Work order: map ${want} companies in ${intake.space}${country ? ` (${country})` : ''}` });
   }
 
   const items: Item[] = [];

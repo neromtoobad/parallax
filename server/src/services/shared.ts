@@ -217,9 +217,13 @@ export async function personOnWeb(name: string, company: string, prefetched?: We
   return { hits, mentions, left };
 }
 
+/**
+ * "former COO of Paystack", "ex-Paystack", "left Paystack", "Paystack alum". Profile snippets list
+ * several jobs separated by "|" or "·", so a "Former ..." in the next job must not count.
+ */
 export function leftSignal(text: string, brand: string) {
   const b = escape(brand);
-  return new RegExp(`(former|ex-|previously|left|departed|stepped down)[^.]{0,40}${b}|${b}[^.]{0,40}(former|alum)`, 'i').test(text);
+  return new RegExp(`\\b(former(ly)?|ex-|previously|left|departed|stepped down)[^.,;|·•\\n]{0,30}\\b${b}\\b|\\b${b}\\s+(alum|alumni|alumnus)\\b`, 'i').test(text);
 }
 
 // ---- Writer audit -----------------------------------------------------------------------------

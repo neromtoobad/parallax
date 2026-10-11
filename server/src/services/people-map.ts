@@ -33,7 +33,7 @@ const MAX = 8;
 export async function runPeopleMap(job: Job): Promise<Deliverable> {
   const intake = await step(job, 'lead', 'intake', () =>
     json<Intake>({
-      system: `You are the Lead at a research agency. A client wants to know who to talk to at one company for a specific goal. Extract the company (and its domain if given, else null) and work out 2-4 groups of people who matter for that goal: who signs off, who uses or owns the problem, who could block it. For each group give a short role label, 2-4 job-title forms as they appear in titles (e.g. "CHRO", "Head of People", "VP Human Resources"), the closest function from this list or null: ${FUNCTIONS.join(', ')}, and one sentence on why that group matters for the goal.`,
+      system: `You are the Lead at a research agency. A client wants to know who to talk to at one company for a specific goal. Extract the company (and its domain if given, else null) and work out 2-4 groups of people who matter for that goal: who signs off, who uses or owns the problem, who could block it. For each group give a short role label, 3-5 job-title forms as they appear in titles, including the common variants (e.g. "CHRO", "Head of People", "People Director", "VP Human Resources"), the closest function from this list or null: ${FUNCTIONS.join(', ')}, and one sentence on why that group matters for the goal.`,
       user: `Client brief: ${job.brief}\nForm fields: ${JSON.stringify(job.input)}\n\nReturn {"name": string, "domain": string|null, "goal": string, "groups": [{"role", "titles": string[], "function": string|null, "why"}]}`,
       check: (v) => (!v?.name ? 'missing name' : !Array.isArray(v.groups) || !v.groups.length ? 'groups must be a non-empty array' : v.groups.some((g: any) => !Array.isArray(g.titles) || !g.titles.length) ? 'every group needs titles' : null),
     }),
@@ -41,7 +41,8 @@ export async function runPeopleMap(job: Job): Promise<Deliverable> {
   intake.groups = intake.groups.slice(0, 4).map((g) => ({ ...g, function: FUNCTIONS.includes(g.function ?? '') ? g.function : null }));
   if (!job.plan) {
     job.plan = intake;
-    say(`Work order: who to talk to at ${intake.name} for ${intake.goal}. Looking for ${intake.groups.map((g) => g.role).join(', ')}`, 'step');
+    // Outside any step there's no agent context, so say() would drop this; emit it as the Lead.
+    emit(job, { agent: 'lead', kind: 'step', text: `Work order: who to talk to at ${intake.name} for ${intake.goal}. Looking for ${intake.groups.map((g) => g.role).join(', ')}` });
   }
 
   const company = await step(job, 'lead', 'resolve', () => {
@@ -55,7 +56,7 @@ export async function runPeopleMap(job: Job): Promise<Deliverable> {
     const found: Candidate[] = [];
     for (const [gi, g] of intake.groups.entries()) {
       say(`Searching the people database at ${company.domain} for ${g.role}`, 'tool');
-      const r = await peopleAt({ domain: company.domain, titles: g.titles, functions: g.function ? [g.function] : undefined, seniority: SENIOR_LEVELS, limit: 6 }).catch((e) => {
+      const r = await peopleAt({ domain: company.domain, titles: g.titles, functions: g.function ? [g.function] : undefined, seniority: [...SENIOR_LEVELS, 'Experienced Manager'], limit: 6 }).catch((e) => {
         if (e instanceof BudgetExceeded) throw e;
         say(`people search for ${g.role} failed (${e.message}); moving on`, 'recover');
         return { profiles: [] };
@@ -139,7 +140,9 @@ export async function runPeopleMap(job: Job): Promise<Deliverable> {
   });
 
   const webConfirmed = kept.filter((k) => k.fields?.webConfirmed === 'true').length;
-  const first = kept[0];
+  // Lead with whoever the approach plan says to contact first.
+  const firstId = plan.points[0]?.cites?.find((c) => /^P\d+$/.test(c) && kept[Number(c.slice(1)) - 1]);
+  const first = firstId ? kept[Number(firstId.slice(1)) - 1] : kept[0];
   return {
     headline: `${kept.length} people to talk to at ${name} about ${intake.goal}; start with ${first.title} (${first.subtitle}). ${webConfirmed} of ${kept.length} confirmed on the open web.`,
     company: { name, domain: company.domain },

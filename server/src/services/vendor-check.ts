@@ -1,6 +1,7 @@
 import { BudgetExceeded, say, step } from '../context.ts';
 import { companyEnrich, companySearch, peopleAt, readPages, webSearch, type WebResult } from '../crust.ts';
 import { json } from '../llm.ts';
+import { emit } from '../store.ts';
 import { quoteOnPage } from '../agents/compare.ts';
 import type { Check, Deliverable, Item, Job, Verdict } from '../types.ts';
 import { clean, companyRow, dedupe, dnsState, looksLikeDomain, money, personOf, personOnWeb, RICH_FIELDS, seniority, type CompanyRow } from './shared.ts';
@@ -41,7 +42,8 @@ export async function runVendorCheck(job: Job): Promise<Deliverable> {
   const givenDomain = clean(intake.domain) ?? (looksLikeDomain(raw) ? clean(raw) : null);
   if (!job.plan) {
     job.plan = { ...intake, domain: givenDomain };
-    say(`Work order: check ${intake.name}${givenDomain ? ` (${givenDomain})` : ''} before paying: ${intake.context}`, 'step');
+    // Outside any step there's no agent context, so say() would drop this; emit it as the Lead.
+    emit(job, { agent: 'lead', kind: 'step', text: `Work order: check ${intake.name}${givenDomain ? ` (${givenDomain})` : ''} before paying: ${intake.context}` });
   }
 
   // 1. Records: is there a company record, and is it this company?

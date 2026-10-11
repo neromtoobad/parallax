@@ -50,7 +50,8 @@ export async function runCompetitorTeardown(job: Job): Promise<Deliverable> {
   );
   if (!job.plan) {
     job.plan = intake;
-    say(`Work order: competitor teardown for ${intake.name}, focus: ${intake.focus}`, 'step');
+    // Outside any step there's no agent context, so say() would drop this; emit it as the Lead.
+    emit(job, { agent: 'lead', kind: 'step', text: `Work order: competitor teardown for ${intake.name}, focus: ${intake.focus}` });
   }
 
   const company = await step(job, 'lead', 'resolve', () => {

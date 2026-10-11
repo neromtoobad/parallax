@@ -37,7 +37,8 @@ export async function runLeadList(job: Job) {
   const want = Math.max(1, Math.min(25, Number(job.input.count ?? intake.count ?? 10)));
   if (!job.plan) {
     job.plan = { ...intake, count: want };
-    say(`Work order: ${want} leads, ${intake.icp}${intake.country ? ` in ${intake.country}` : ''}, contact: ${intake.titles.join(' / ')}`, 'step');
+    // Outside any step there's no agent context, so say() would drop this; emit it as the Lead.
+    emit(job, { agent: 'lead', kind: 'step', text: `Work order: ${want} leads, ${intake.icp}${intake.country ? ` in ${intake.country}` : ''}, contact: ${intake.titles.join(' / ')}` });
   }
 
   const leads: Lead[] = [];

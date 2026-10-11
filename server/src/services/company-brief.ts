@@ -2,6 +2,7 @@ import { say, step } from '../context.ts';
 import { companyEnrich, companySearch, peopleAt, readPages, webSearch, type WebResult } from '../crust.ts';
 import { env } from '../env.ts';
 import { json } from '../llm.ts';
+import { emit } from '../store.ts';
 import { num, quoteOnPage, quoteSupports, same, type Kind } from '../agents/compare.ts';
 import type { Claim, Job, Resolved } from '../types.ts';
 import { auditPoints, canon, clean, dedupe, personOf, pick, place } from './shared.ts';
@@ -50,7 +51,8 @@ export async function runCompanyBrief(job: Job) {
   );
   if (!job.plan) {
     job.plan = intake;
-    say(`Work order: brief on ${intake.name}${intake.domain ? ` (${intake.domain})` : ''} for: ${intake.purpose}`, 'step');
+    // Outside any step there's no agent context, so say() would drop this; emit it as the Lead.
+    emit(job, { agent: 'lead', kind: 'step', text: `Work order: brief on ${intake.name}${intake.domain ? ` (${intake.domain})` : ''} for: ${intake.purpose}` });
   }
 
   // 2. Lead: pin down which company. A wrong match poisons everything after it.
