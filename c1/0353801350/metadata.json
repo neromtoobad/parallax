@@ -1,0 +1,28 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "c10353801350",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "docs/neatlogs/README.md",
+    "server/src/crust.ts",
+    "server/src/runner.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/c1/0353801350/0/metadata.json",
+      "transcript": "/c1/0353801350/0/full.jsonl",
+      "compact_transcript": "/c1/0353801350/0/transcript.jsonl",
+      "content_hash": "/c1/0353801350/0/content_hash.txt",
+      "prompt": "/c1/0353801350/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 28,
+    "cache_creation_tokens": 10305,
+    "cache_read_tokens": 6031582,
+    "output_tokens": 6080,
+    "api_call_count": 14
+  }
+}
