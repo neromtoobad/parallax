@@ -22,7 +22,8 @@ interface Intake {
   headcountMax: number | null;
 }
 
-const BROAD_TITLES = ['Founder', 'CEO', 'Head of', 'VP', 'Director'];
+// When nobody holds the exact title, a founder or C-level exec can still take the call. A sales director can't.
+const BROAD_TITLES = ['Founder', 'CEO', 'Chief'];
 
 export async function runLeadList(job: Job) {
   const intake = await step(job, 'lead', 'intake', () =>
@@ -166,9 +167,10 @@ async function checkLead(intake: Intake, c: { name: string; domain: string; desc
   const ranked = people.map(personOf).filter((p) => p.name);
   const order = [...intake.titles, ...BROAD_TITLES].map((t) => t.toLowerCase());
   ranked.sort((a, b) => rank(a.title, order) - rank(b.title, order));
-  const person = ranked[0];
-  checks.push({ name: 'contact in the database', ok: !!person, note: person ? `${person.name}, ${person.title}` : 'nobody senior found' });
-  if (!person) return drop('no contact found');
+  // The contact must hold one of the asked-for roles, or be a founder/C-level stand-in.
+  const person = ranked.find((p) => rank(p.title, order) < 99);
+  checks.push({ name: 'contact in the database', ok: !!person, note: person ? `${person.name}, ${person.title}` : ranked.length ? `only ${ranked[0].title}; not the role asked for` : 'nobody senior found' });
+  if (!person) return drop(ranked.length ? `no one in the right role (closest: ${ranked[0].title})` : 'no contact found');
 
   // Field angle 2: does the open web agree this person is there now?
   const hits = await webSearch(`"${person.name}" ${c.name}`).catch(() => []);
@@ -192,9 +194,16 @@ async function checkLead(intake: Intake, c: { name: string; domain: string; desc
   };
 }
 
+const FILLER = new Set(['of', 'and', 'the', '&', 'for', 'at']);
+const toks = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter((w) => w && !FILLER.has(w));
+
+/** Position of the first wanted title whose every word is a whole word in this title ("CTO" no longer matches "Director"). */
 function rank(title: string, order: string[]) {
-  const t = title.toLowerCase();
-  const i = order.findIndex((o) => t.includes(o));
+  const t = new Set(toks(title));
+  const i = order.findIndex((o) => {
+    const w = toks(o);
+    return w.length > 0 && w.every((x) => t.has(x) || (x === 'founder' && t.has('cofounder')));
+  });
   return i < 0 ? 99 : i;
 }
 

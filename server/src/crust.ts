@@ -121,7 +121,12 @@ export const PERSON_FIELDS = [
 ];
 
 export const peopleAt = tool('crustdata.person_search', async (q: { domain: string; titles: string[]; limit?: number }) => {
-  const titleConds = q.titles.map((t) => ({ field: 'experience.employment_details.current.title', type: '(.)', value: t }));
+  // "VP Engineering" should find "VP of Engineering": every word of a title must appear, in any order.
+  const titleConds = q.titles.map((t) => {
+    const words = t.split(/[\s,&/]+/).filter((w) => w.length > 1 && !/^(of|and|the|for)$/i.test(w));
+    const conds = words.map((w) => ({ field: 'experience.employment_details.current.title', type: '(.)', value: w }));
+    return conds.length === 1 ? conds[0] : { op: 'and', conditions: conds };
+  });
   const body = {
     filters: {
       op: 'and',
