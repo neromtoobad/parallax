@@ -17,6 +17,7 @@ interface Profile {
   company: string;
   since: string | null;
   until?: string | null;
+  domain?: string | null;
   profileUrl: string | null;
 }
 
@@ -68,6 +69,9 @@ export async function runPersonCheck(job: Job): Promise<Deliverable> {
     const other = any.filter((p) => sameName(p.basic_profile?.name, person)).map((p) => profileOf(p));
     return { status: other.length ? 'elsewhere' : 'none', profile: null, others: other };
   });
+
+  // The database profile knows the employer's website even when the company search didn't.
+  if (!company.domain && rec.status === 'current' && rec.profile?.domain) company.domain = rec.profile.domain;
 
   // Field: the open web and the company's own team page.
   const field = await step(job, 'field', 'web', async () => {
@@ -204,6 +208,7 @@ function profileOf(p: any, company?: { name: string; domain: string | null }, pa
     company: role.name ?? role.company_name ?? '',
     since: role.start_date ?? null,
     until: role.end_date ?? null,
+    domain: clean(role.company_website_domain ?? role.company_website),
     profileUrl: p.social_handles?.professional_network_identifier?.profile_url ?? null,
   };
 }
@@ -219,7 +224,7 @@ function sameName(a: unknown, b: string) {
 }
 
 const EXPAND: Record<string, string> = { ceo: 'chief executive officer', cto: 'chief technology officer', cfo: 'chief financial officer', coo: 'chief operating officer', cmo: 'chief marketing officer', cpo: 'chief product officer', chro: 'chief human resources officer', vp: 'vice president', svp: 'senior vice president' };
-const longForm = (t: string) => t.toLowerCase().replace(/\b(ceo|cto|cfo|coo|cmo|cpo|chro|vp|svp)\b/g, (m) => EXPAND[m]);
+const longForm = (t: string) => t.toLowerCase().replace(/\bco[\s-]+founder/g, 'cofounder').replace(/\b(ceo|cto|cfo|coo|cmo|cpo|chro|vp|svp)\b/g, (m) => EXPAND[m]);
 
 /** "CEO" matches "Co-founder & CEO" and "Chief Executive Officer"; "CTO" doesn't match "CEO". */
 export function titleMatch(onRecord: string, asked: string) {

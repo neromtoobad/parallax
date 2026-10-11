@@ -107,9 +107,16 @@ api.get('/jobs/:id/events', (c) => {
 /** The CFO's books: every delivered job, priced vs. what it cost. */
 api.get('/books', (c) => {
   const jobs = listJobs().filter((j) => j.status === 'delivered' || j.status === 'paused' || j.status === 'failed');
-  const delivered = jobs.filter((j) => j.status === 'delivered');
-  const revenue = delivered.reduce((a, j) => a + (j.result?.books?.revenueUsd ?? 0), 0);
-  const cost = jobs.reduce((a, j) => a + j.spend.totalUsd, 0);
+  // Eval, dev and live-test runs are ours: real cost, but nobody paid. Keep them out of revenue.
+  const isTest = (j: Job) => !!j.tag;
+  const totalsOf = (js: Job[]) => {
+    const delivered = js.filter((j) => j.status === 'delivered');
+    const revenue = delivered.reduce((a, j) => a + (j.result?.books?.revenueUsd ?? 0), 0);
+    const cost = js.reduce((a, j) => a + j.spend.totalUsd, 0);
+    return { jobs: js.length, delivered: delivered.length, revenueUsd: revenue, costUsd: cost, marginPct: revenue ? ((revenue - cost) / revenue) * 100 : 0 };
+  };
+  const client = totalsOf(jobs.filter((j) => !isTest(j)));
+  const test = totalsOf(jobs.filter(isTest));
   const perService = SERVICES.map((s) => {
     const h = history(s.id, 50);
     const units = h.map((x) => x.perUnit).sort((a, b) => a - b);
@@ -123,7 +130,8 @@ api.get('/books', (c) => {
     };
   });
   return c.json({
-    totals: { jobs: jobs.length, delivered: delivered.length, revenueUsd: revenue, costUsd: cost, marginPct: revenue ? ((revenue - cost) / revenue) * 100 : 0 },
+    totals: client,
+    test,
     perService,
     jobs: jobs.slice(0, 50).map((j) => ({ ...summary(j), books: j.result?.books, units: unitsOf(j) })),
   });

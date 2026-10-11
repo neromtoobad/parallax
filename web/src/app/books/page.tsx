@@ -1,86 +1,107 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { api, cents, usd } from '@/lib/api';
+import { serviceById } from '@/lib/catalog';
+import { sprite } from '@/lib/cast';
 
 export default function Books() {
   const [b, setB] = useState<any>(null);
-  const [evals, setEvals] = useState<any[]>([]);
   useEffect(() => {
     api('/books').then(setB).catch(() => {});
-    api<any[]>('/evals').then((e) => setEvals(e.sort((x, y) => x.label.localeCompare(y.label)))).catch(() => {});
   }, []);
-  if (!b) return <main className="wrap" style={{ padding: 60 }}>Loading the books…</main>;
+  if (!b) return <main className="wrap" style={{ padding: 60 }}>Opening the books…</main>;
+  const t = b.test;
 
   return (
     <main className="wrap" style={{ padding: '40px 24px' }}>
-      <div className="eyebrow">The CFO’s books</div>
-      <h2 style={{ marginTop: 8 }}>What each job really costs, and what we charge</h2>
-      <p className="muted" style={{ maxWidth: 680 }}>
-        Every model call and data call is metered as it happens and charged to the agent that made it. The CFO prices the next job from these numbers (the 75th percentile of recent cost per unit), so quotes get sharper with every job.
-      </p>
+      <div className="card" style={{ display: 'flex', gap: 24, alignItems: 'flex-end', padding: '26px 28px 0', overflow: 'hidden', background: 'color-mix(in srgb, var(--cfo) 7%, #fff)' }}>
+        <div style={{ flex: 1, paddingBottom: 26 }}>
+          <span className="eyebrow" style={{ color: 'var(--cfo)' }}>
+            the cfo’s books
+          </span>
+          <h1 className="display" style={{ fontSize: 'clamp(34px, 4.6vw, 54px)', margin: '10px 0 10px' }}>
+            What every job really costs.
+          </h1>
+          <p className="lede" style={{ fontSize: 17 }}>
+            Every model call and every data call is metered as it happens and charged to the agent that made it. The CFO prices the next job from these numbers (the 75th percentile of recent cost per unit), so quotes get sharper with every job.
+          </p>
+        </div>
+        <img src={sprite('cfo', 'work')} alt="The CFO" style={{ height: 250, width: 'auto' }} />
+      </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginTop: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginTop: 18 }}>
         {[
-          ['Jobs delivered', `${b.totals.delivered}`],
-          ['Revenue', usd(b.totals.revenueUsd)],
-          ['Cost', usd(b.totals.costUsd, 4)],
-          ['Gross margin', `${b.totals.marginPct.toFixed(1)}%`],
-        ].map(([k, v]) => (
+          ['Client jobs delivered', `${b.totals.delivered}`, 'paid work from real clients'],
+          ['Client revenue', usd(b.totals.revenueUsd), b.totals.revenueUsd ? `${b.totals.marginPct.toFixed(1)}% gross margin` : 'first clients this week'],
+          ['Test and eval runs', `${t.delivered}`, `${usd(t.costUsd, 2)} real spend, not charged`],
+          ['Value of those runs at list price', usd(t.revenueUsd), `${t.revenueUsd ? ((1 - t.costUsd / t.revenueUsd) * 100).toFixed(1) : 0}% margin had they been paid`],
+        ].map(([k, v, sub]) => (
           <div key={k} className="card pad">
             <div className="muted" style={{ fontSize: 13 }}>
               {k}
             </div>
-            <div style={{ fontSize: 28, fontWeight: 650, letterSpacing: '-0.02em' }}>{v}</div>
+            <div style={{ fontFamily: 'var(--display)', fontSize: 32, fontWeight: 700, letterSpacing: '-0.02em' }}>{v}</div>
+            <div className="muted" style={{ fontSize: 12.5 }}>
+              {sub}
+            </div>
           </div>
         ))}
       </div>
 
-      <div className="grid2" style={{ marginTop: 18 }}>
-        {b.perService.map((s: any) => (
-          <div key={s.service} className="card pad">
-            <h3>{s.service === 'company-brief' ? 'Company brief' : 'Lead list'}</h3>
-            <table className="t">
-              <tbody>
-                <tr>
-                  <td className="muted">Delivered jobs measured</td>
-                  <td className="mono" style={{ textAlign: 'right' }}>
-                    {s.jobs}
-                  </td>
-                </tr>
-                <tr>
-                  <td className="muted">Median cost per {s.unit}</td>
-                  <td className="mono" style={{ textAlign: 'right' }}>
-                    {s.medianCostPerUnit == null ? '–' : usd(s.medianCostPerUnit, 4)}
-                  </td>
-                </tr>
-                <tr>
-                  <td className="muted">75th percentile (what the CFO prices from)</td>
-                  <td className="mono" style={{ textAlign: 'right' }}>
-                    {s.p75CostPerUnit == null ? '–' : usd(s.p75CostPerUnit, 4)}
-                  </td>
-                </tr>
-                <tr>
-                  <td className="muted">Next quote{s.service === 'lead-list' ? ' (10 leads)' : ''}</td>
-                  <td className="mono" style={{ textAlign: 'right' }}>
-                    {usd(s.nextQuote.priceUsd)} · cap {usd(s.nextQuote.budgetUsd, 3)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        ))}
+      <h2 className="display" style={{ fontSize: 30, marginTop: 44 }}>
+        Unit economics by service
+      </h2>
+      <div className="grid3" style={{ marginTop: 14 }}>
+        {b.perService.map((s: any) => {
+          const def = serviceById(s.service);
+          return (
+            <div key={s.service} className="card pad">
+              <h3>{def?.name ?? s.service}</h3>
+              <table className="t">
+                <tbody>
+                  <tr>
+                    <td className="muted">Delivered jobs measured</td>
+                    <td className="mono" style={{ textAlign: 'right' }}>
+                      {s.jobs}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="muted">Median cost per {s.unit}</td>
+                    <td className="mono" style={{ textAlign: 'right' }}>
+                      {s.medianCostPerUnit == null ? '–' : usd(s.medianCostPerUnit, 3)}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="muted">75th percentile (priced from)</td>
+                    <td className="mono" style={{ textAlign: 'right' }}>
+                      {s.p75CostPerUnit == null ? '–' : usd(s.p75CostPerUnit, 3)}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="muted">Next quote</td>
+                    <td className="mono" style={{ textAlign: 'right' }}>
+                      {usd(s.nextQuote.priceUsd)} · cap {usd(s.nextQuote.budgetUsd, 2)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          );
+        })}
       </div>
 
-      {evals.length > 0 && <Evals evals={evals} />}
-
-      <div className="card" style={{ marginTop: 18 }}>
-        <table className="t">
+      <h2 className="display" style={{ fontSize: 30, marginTop: 44 }}>
+        Every job, priced against what it cost
+      </h2>
+      <div className="card" style={{ marginTop: 14, overflowX: 'auto' }}>
+        <table className="t" style={{ minWidth: 720 }}>
           <thead>
             <tr>
               <th>Job</th>
               <th>Status</th>
-              <th style={{ textAlign: 'right' }}>Revenue</th>
+              <th style={{ textAlign: 'right' }}>Price</th>
               <th style={{ textAlign: 'right' }}>Cost</th>
               <th style={{ textAlign: 'right' }}>vs estimate</th>
               <th style={{ textAlign: 'right' }}>Margin</th>
@@ -90,9 +111,11 @@ export default function Books() {
             {b.jobs.map((j: any) => (
               <tr key={j.id}>
                 <td>
-                  <a href={`/jobs/${j.id}`}>{j.service === 'company-brief' ? 'Company brief' : `Lead list (${j.units})`}</a>
+                  <Link href={`/jobs/${j.id}`} style={{ fontWeight: 600 }}>
+                    {serviceById(j.service)?.name ?? j.service}
+                  </Link>
                   <div className="mono muted" style={{ fontSize: 11 }}>
-                    {j.brief.split('\n')[0].slice(0, 60)} {j.tag && `· ${j.tag}`}
+                    {j.brief.split('\n')[0].slice(0, 64)} {j.tag && <span className="pill" style={{ height: 18, fontSize: 10.5 }}>{j.tag}</span>}
                   </div>
                 </td>
                 <td>{j.status}</td>
@@ -114,48 +137,5 @@ export default function Books() {
         </table>
       </div>
     </main>
-  );
-}
-
-function Evals({ evals }: { evals: any[] }) {
-  const briefs = (rows: any[]) => rows.filter((r) => r.service === 'company-brief');
-  const leads = (rows: any[]) => rows.filter((r) => r.service === 'lead-list');
-  const sum = (rows: any[], k: string) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
-  const pct = (n: number, d: number) => (d ? `${Math.round((n / d) * 100)}%` : '–');
-  const metrics: [string, (rows: any[]) => string][] = [
-    ['Facts seen from both angles', (r) => pct(sum(briefs(r), 'twoAngle'), sum(briefs(r), 'facts'))],
-    ['Facts verified', (r) => pct(sum(briefs(r), 'verified'), sum(briefs(r), 'facts'))],
-    ['Gold facts wrong', (r) => `${sum(briefs(r), 'goldWrong')} of ${briefs(r).length * 2}`],
-    ['Brief points with guesswork', (r) => pct(sum(briefs(r), 'hedgedPoints'), sum(briefs(r), 'points'))],
-    ['Avg cost per brief', (r) => usd(sum(briefs(r), 'costUsd') / Math.max(1, briefs(r).length), 4)],
-    ['Leads delivered / wanted', (r) => `${sum(leads(r), 'verified')}/${sum(leads(r), 'wanted')}`],
-    ['Cost per delivered lead', (r) => usd(sum(leads(r), 'costUsd') / Math.max(1, sum(leads(r), 'verified')), 4)],
-  ];
-  return (
-    <div className="card pad" style={{ marginTop: 18 }}>
-      <h3>Evals: the same fixed jobs, run on each version of the team</h3>
-      <table className="t">
-        <thead>
-          <tr>
-            <th>Metric</th>
-            {evals.map((e) => (
-              <th key={e.label}>{e.label}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {metrics.map(([name, f]) => (
-            <tr key={name}>
-              <td>{name}</td>
-              {evals.map((e) => (
-                <td key={e.label} className="mono">
-                  {f(e.rows)}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
   );
 }

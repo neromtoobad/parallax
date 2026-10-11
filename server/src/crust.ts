@@ -212,15 +212,16 @@ export const directFetch = tool('web.direct_fetch', async (url: string) => {
 });
 
 /** A bot-check or empty shell isn't a page. */
-export function usablePage(p?: { ok: boolean; text: string }) {
-  if (!p?.ok || p.text.length < 400) return false;
+export function usablePage(p?: { ok: boolean; text: string }, minText = 400) {
+  if (!p?.ok || p.text.length < minText) return false;
   return !/checking your browser|just a moment|enable javascript and cookies|verify you are human|attention required|access denied/i.test(p.text.slice(0, 1500));
 }
 
 /** Read pages: our own fetch first (free), Crustdata only for the ones that didn't come back usable. */
-export async function readPages(urls: string[], opts: { humanRetry?: boolean } = {}) {
+export async function readPages(urls: string[], opts: { humanRetry?: boolean; minText?: number } = {}) {
   const first = await Promise.all(urls.map((u) => directFetch(u)));
-  const missing = urls.filter((_, i) => !usablePage(first[i]));
+  // A JavaScript shell can be "usable" but nearly empty; callers that read facts ask for more text.
+  const missing = urls.filter((_, i) => !usablePage(first[i], opts.minText));
   const out = new Map(urls.map((u, i) => [u, first[i]]));
   if (missing.length) {
     const paid = await webFetch(missing).catch(() => missing.map((u) => ({ url: u, ok: false, title: '', text: '' })));

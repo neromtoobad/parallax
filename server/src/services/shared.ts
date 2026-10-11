@@ -148,16 +148,30 @@ export async function resolveCompany(name: string, domain: string | null, brief:
   const exact = d && list.find((c) => c.domain === d);
   if (exact) return exact;
   if (d) return { name, domain: d, description: '', headcount: null, country: null, founded: null, hq: null, fundingUsd: null, lastRound: null };
-  if (!list.length) throw new Error(`no company found for "${name}"`);
-  const choice = await json<{ index: number; reason: string }>({
-    system: 'Pick the company the client means. If none fit, return index -1.',
-    user: `Client brief: ${brief}\nCandidates:\n${list.map((c, i) => `${i}. ${c.name} (${c.domain}) ${c.headcount ?? '?'} staff: ${c.description.slice(0, 160)}`).join('\n')}\n\nReturn {"index": number, "reason": string}`,
-    check: (v) => (typeof v?.index !== 'number' ? 'index must be a number' : null),
-  });
-  if (choice.index < 0 || !list[choice.index]) throw new Error(`could not tell which "${name}" the client means`);
-  say(`Matched ${list[choice.index].name} (${list[choice.index].domain}): ${choice.reason}`);
-  return list[choice.index];
+  const choice = list.length
+    ? await json<{ index: number; reason: string }>({
+        system: 'Pick the company the client means. If none fit, return index -1.',
+        user: `Client brief: ${brief}\nCandidates:\n${list.map((c, i) => `${i}. ${c.name} (${c.domain}) ${c.headcount ?? '?'} staff: ${c.description.slice(0, 160)}`).join('\n')}\n\nReturn {"index": number, "reason": string}`,
+        check: (v) => (typeof v?.index !== 'number' ? 'index must be a number' : null),
+      })
+    : { index: -1, reason: 'no database hits' };
+  if (choice.index >= 0 && list[choice.index]) {
+    say(`Matched ${list[choice.index].name} (${list[choice.index].domain}): ${choice.reason}`);
+    return list[choice.index];
+  }
+  // Short or common names ("Linear") drown in lookalikes. Ask the web for the official site, then look that domain up.
+  say(`The database has no clear match for "${name}"; asking the web for its official site`, 'recover');
+  const web = await webSearch(`${name} official website`).catch(() => [] as WebResult[]);
+  const brand = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const site = web.map((r) => clean(r.url)).find((h) => h && !SOCIAL.test(h) && h.replace(/[^a-z0-9]/g, '').includes(brand.slice(0, 12)));
+  if (!site) throw new Error(`could not tell which "${name}" the client means`);
+  const again = (await companySearch({ query: `${name} ${site}`, limit: 5, fields: RICH_FIELDS })).companies?.map(companyRow) ?? [];
+  const hit = again.find((c) => c.domain === site);
+  say(`The web points to ${site}${hit ? `; matched ${hit.name} in the database` : ''}`);
+  return hit ?? { name, domain: site, description: '', headcount: null, country: null, founded: null, hq: null, fundingUsd: null, lastRound: null };
 }
+
+const SOCIAL = /linkedin\.com|facebook\.com|instagram\.com|(^|\.)x\.com|twitter\.com|youtube\.com|wikipedia\.org|crunchbase\.com|tiktok\.com|github\.com/i;
 
 /**
  * Screen database hits against a profile with one cheap model call, then drop dead domains (a DNS

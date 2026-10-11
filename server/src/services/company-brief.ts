@@ -114,7 +114,7 @@ export async function runCompanyBrief(job: Job) {
       const fresh = urls.map(canon).filter((u) => !pages.some((p) => canon(p.url) === u));
       if (!fresh.length) return;
       say(`Reading ${fresh.length} page${fresh.length > 1 ? 's' : ''}`, 'tool');
-      const got = await readPages(fresh).catch((e) => (say(`page fetch failed (${e.message}); working from search snippets`, 'recover'), []));
+      const got = await readPages(fresh, { minText: 1500 }).catch((e) => (say(`page fetch failed (${e.message}); working from search snippets`, 'recover'), []));
       for (const p of got) if (p.ok) pages.push({ id: `P${pages.length + 1}`, url: canon(p.url), title: p.title, text: p.text });
     };
     const extract = async (keys: string[]) => {

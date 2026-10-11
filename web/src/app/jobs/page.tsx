@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { api, cents, usd } from '@/lib/api';
+import { serviceById } from '@/lib/catalog';
 
 interface Row {
   id: string;
@@ -32,7 +33,7 @@ export default function Jobs() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'end' }}>
         <div>
           <div className="eyebrow">Jobs</div>
-          <h2 style={{ marginTop: 8 }}>Everything the team has worked on</h2>
+          <h2 className="display" style={{ marginTop: 8, fontSize: 40 }}>Everything the team has worked on</h2>
         </div>
         <label style={{ fontSize: 13 }} className="muted">
           <input type="checkbox" checked={showEval} onChange={(e) => setShowEval(e.target.checked)} /> include eval runs
@@ -55,7 +56,7 @@ export default function Jobs() {
               <tr key={r.id}>
                 <td>
                   <Link href={`/jobs/${r.id}`} style={{ fontWeight: 560 }}>
-                    {r.service === 'company-brief' ? 'Company brief' : 'Lead list'}
+                    {serviceById(r.service)?.name ?? r.service}
                   </Link>
                   <div className="mono muted" style={{ fontSize: 11 }}>
                     {new Date(r.createdAt).toLocaleString()} {r.tag && `· ${r.tag}`}
@@ -70,7 +71,11 @@ export default function Jobs() {
                   {r.stats
                     ? r.service === 'company-brief'
                       ? `${r.stats.verified}/${r.stats.facts} facts verified`
-                      : `${r.stats.verified}/${r.stats.wanted} leads`
+                      : r.stats.wanted != null
+                        ? `${r.stats.verified}/${r.stats.wanted} verified`
+                        : r.stats.verified != null
+                          ? `${r.stats.verified} verified`
+                          : 'delivered'
                     : '–'}
                 </td>
                 <td className="mono" style={{ textAlign: 'right' }}>
