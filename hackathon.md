@@ -167,7 +167,26 @@ Pending.
 
 ## Known limitations and next steps
 
-Pending.
+**Limitations**
+
+- **Small samples.**
+  - The eval has 7 company briefs and 2 lead lists.
+  - The five newer services have 1–4 measured jobs each, so their unit costs are early estimates.
+  - Some eval swings (v3 → v4 lead lists) are partly run-to-run variance.
+- **Gold facts are narrow.** The eval checks founding year and CEO. Headquarters, headcount and funding aren't scored against known answers. That's how the HQ bug reached production before the live check caught it.
+- **The Writer can still infer past the facts.** The guesswork audit catches hedging words ("likely", "may"), but not a confident inference built on a verified fact ("a presence in the Asia-Pacific market").
+- **One Crustdata dependency.** Records is a single database. When it's wrong and the web is thin, the Arbiter has little to break the tie with.
+- **No payments or accounts.** Jobs are quoted and "accepted" without taking money, and the Books revenue is what the jobs would have earned at their quoted prices. The production jobs are tagged test runs.
+- **The Entire capture has a gap.** Commits from 07:15 to 09:52 on Oct 11 have no checkpoints (see `docs/entire/`).
+- **The business plan is a model, not demand.** It leaves out acquisition spend and taxes, and the Growth scenario is a stretch.
+
+**Next steps**
+
+1. Wider gold facts in the eval (HQ, headcount, latest round), and an inference check in the Writer audit.
+2. Payments (merchant of record) and client accounts, so Books shows real revenue.
+3. A second structured data source, so Records isn't a single point of failure.
+4. Re-price the newer services once each has 10+ delivered jobs; the CFO already re-prices from history automatically.
+5. Ask Ari (cfo.ai) how long the founder draw can wait in the Base case, so the bridge is sized properly.
 
 ## Submission
 
