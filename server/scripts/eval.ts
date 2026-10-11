@@ -10,6 +10,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { init, flush, shutdown } from 'neatlogs';
 import { BRIEFS, LEADS } from '../evals/cases.ts';
+import { goldScore } from '../evals/score.ts';
 
 const args = process.argv.slice(2);
 const opt = (k: string) => {
@@ -42,14 +43,7 @@ if (only !== 'leads') {
     const { job, secs } = await run('company-brief', c.id, c.input);
     const r = job.result ?? {};
     const facts: any[] = r.facts ?? [];
-    const fact = (k: string) => facts.find((f) => f.key === k);
-    const founded = fact('founded');
-    const ceo = fact('ceo');
-    const lastName = c.gold.ceo.split(' ').pop()!.toLowerCase();
-    const gold = [
-      founded?.verified && founded.value != null ? (Number(String(founded.value).match(/\d{4}/)?.[0]) === c.gold.founded ? 'right' : 'wrong') : 'missing',
-      ceo?.verified && ceo.value ? (String(ceo.value).toLowerCase().includes(lastName) ? 'right' : 'wrong') : 'missing',
-    ];
+    const gold = goldScore(c, facts);
     const points: any[] = r.points ?? [];
     const hedged = points.filter((p) => (p.text.match(HEDGES) ?? []).length > 0).length;
     rows.push({

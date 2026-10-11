@@ -1,12 +1,23 @@
 /**
  * Compare two eval runs:  node scripts/compare.ts v1 v2  → prints markdown, writes evals/<a>-vs-<b>.md
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { BRIEFS } from '../evals/cases.ts';
+import { goldScore } from '../evals/score.ts';
 import { join } from 'node:path';
 
 const [a, b] = process.argv.slice(2);
 const dir = join(import.meta.dirname, '../evals');
-const load = (l: string) => JSON.parse(readFileSync(join(dir, 'results', `${l}.json`), 'utf8')).rows as any[];
+// Gold scores are recomputed from the saved jobs with the current gold set, so a gold correction
+// applies to every run alike.
+const load = (l: string) =>
+  (JSON.parse(readFileSync(join(dir, 'results', `${l}.json`), 'utf8')).rows as any[]).map((r) => {
+    const c = BRIEFS.find((b) => b.id === r.case);
+    const file = join(dir, '../../data/jobs', `${r.jobId}.json`);
+    if (r.service !== 'company-brief' || !c || !existsSync(file)) return r;
+    const g = goldScore(c, JSON.parse(readFileSync(file, 'utf8')).result?.facts ?? []);
+    return { ...r, goldRight: g.filter((x) => x === 'right').length, goldWrong: g.filter((x) => x === 'wrong').length };
+  });
 const A = load(a), B = load(b);
 
 const sum = (rows: any[], k: string) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);

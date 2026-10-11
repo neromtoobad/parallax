@@ -6,7 +6,7 @@
 export interface BriefCase {
   id: string;
   input: { company: string; purpose: string };
-  gold: { founded: number; ceo: string };
+  gold: { founded: number; ceo: string | string[] };
 }
 
 export interface LeadCase {
@@ -21,7 +21,7 @@ export const BRIEFS: BriefCase[] = [
   { id: 'retool', input: { company: 'Retool', purpose: 'Investor meeting prep: how big are they now' }, gold: { founded: 2017, ceo: 'David Hsu' } },
   { id: 'paystack', input: { company: 'Paystack (paystack.com)', purpose: 'Sales call: we sell fraud screening to payment companies in Africa' }, gold: { founded: 2015, ceo: 'Shola Akinlade' } },
   { id: 'flutterwave', input: { company: 'Flutterwave', purpose: 'Partnership pitch for cross-border payouts' }, gold: { founded: 2016, ceo: 'Olugbenga Agboola' } },
-  { id: 'posthog', input: { company: 'PostHog', purpose: 'Sales call: we sell data warehouse connectors' }, gold: { founded: 2020, ceo: 'James Hawkins' } },
+  { id: 'posthog', input: { company: 'PostHog', purpose: 'Sales call: we sell data warehouse connectors' }, gold: { founded: 2020, ceo: ['James Hawkins', 'Tim Glaser'] } }, // co-CEOs, per posthog.com/about
 ];
 
 export const LEADS: LeadCase[] = [

@@ -23,6 +23,19 @@ const words = (s: string) =>
 
 const STOP = new Set(['inc', 'the', 'and', 'of', 'llc', 'ltd', 'usa', 'united', 'states', 'america']);
 
+/** "James Hawkins and Tim Glaser (Co-CEOs)" → ["James Hawkins", "Tim Glaser"]. */
+export function people(v: string) {
+  return v
+    .replace(/\([^)]*\)/g, ' ')
+    .split(/\s*(?:,|&|\band\b|\/|;)\s*/i)
+    .map((x) => x.trim())
+    .filter((x) => words(x).length > 0);
+}
+const surname = (n: string) => {
+  const w = words(n);
+  return w[w.length - 1] ?? '';
+};
+
 export function same(kind: Kind, a: unknown, b: unknown): boolean {
   if (a == null || b == null || a === '' || b === '') return false;
   switch (kind) {
@@ -41,8 +54,9 @@ export function same(kind: Kind, a: unknown, b: unknown): boolean {
     case 'round':
       return roundType(String(a)) === roundType(String(b)) && roundType(String(a)) !== '';
     case 'person': {
-      const wa = words(String(a)), wb = words(String(b));
-      return wa.length > 0 && wb.length > 0 && wa[wa.length - 1] === wb[wb.length - 1];
+      // Co-CEOs are common: agree when the two answers share at least one person.
+      const sa = new Set(people(String(a)).map(surname)), sb = people(String(b)).map(surname);
+      return sb.some((x) => x && sa.has(x));
     }
     case 'place': {
       const wa = words(String(a)).filter((w) => !STOP.has(w)), wb = new Set(words(String(b)).filter((w) => !STOP.has(w)));
@@ -106,8 +120,10 @@ export function quoteSupports(kind: Kind, value: unknown, quote: string): boolea
     case 'round':
       return roundType(q) === roundType(String(value));
     case 'person': {
-      const v = words(String(value));
-      return v.length > 0 && words(quote).includes(v[v.length - 1]);
+      // Every person named in the value must appear in the quote.
+      const q = words(quote);
+      const names = people(String(value));
+      return names.length > 0 && names.every((n) => q.includes(surname(n)));
     }
     case 'place': {
       const qw = new Set(words(quote));
