@@ -5,7 +5,7 @@ const root = resolve(import.meta.dirname, '../..');
 export const env = {
   root,
   dataDir: process.env.PARALLAX_DATA ?? join(root, 'data'),
-  port: Number(process.env.PORT ?? process.env.API_PORT ?? 8787),
+  port: Number(process.env.API_PORT || process.env.PORT || 8787),
 
   litellmKey: process.env.LITELLM_API_KEY ?? '',
   litellmBase: process.env.LITELLM_BASE_URL ?? 'https://litellm.vision.aivar.app/v1',

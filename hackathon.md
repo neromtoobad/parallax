@@ -29,6 +29,19 @@
 - Followed Entire's neatHack guide (hack.entire.io/neathacks-2026): installed Entire Brain (`entire brain init-agents`, `entire brain setup`, which indexed 24 files and 257 symbols) and added the brain MCP server in `.mcp.json`.
 - The first build session started outside the repo, before Entire's hooks existed, so it wasn't captured. That transcript also includes unrelated private notes, so it was not attached as a public checkpoint. The build continues in a fresh session opened in the repo, so every prompt and commit from here on is captured.
 
+- First live job (company brief on Linear): it failed on a Crustdata 400 (a field name the API rejected), was fixed, then resumed from its checkpoint and delivered.
+  - On the way it repaired a malformed model reply, and the Verifier rejected a web quote it could not find on the page, falling back to the database value.
+  - Cost $0.161 against a $2 price.
+  - neatlogs traces: `b0b16a50333cee82a2b6a842a258c667` (the failed run) and `313af6c8df2b296df7483c325d04f2ea` (the resumed run).
+- Built the eval harness (`server/evals/cases.ts`, `scripts/eval.ts`, `scripts/compare.ts`): 7 company briefs with gold facts (founding year, CEO) and 2 lead lists. Every eval job is a normal traced job tagged `eval:<label>`.
+- Ran the baseline eval `v1` and read its traces to find what to fix:
+  - **The Verifier falsely rejected a correct CEO quote.** HTML-to-text drops spaces ("Karri SaarinenCo-founder"), so the quote check now ignores spacing.
+  - **Field wasted credits on duplicate URLs** (`linear.app` and `linear.app/`) and on pages that block bots (Reddit). URLs are now canonicalised and those sites skipped.
+  - **Field ran one fixed round of searches**, so facts missing after the first pass were never searched for. It now runs a second, targeted search per missing fact.
+  - **The Writer padded the brief with guesses** ("likely", "will resonate"). The audit now rejects them.
+- Web app (`web/`, Next.js): hire form with a CFO quote, a live job page (both angles side by side, verdicts, a streamed timeline, money against the budget cap, checkpoints, trace IDs), a jobs list, and a books page with eval comparisons.
+  - Fixed live updates: Next's proxy gzip-buffered the event stream, so compression is now off for it.
+
 ## Demo
 
 Pending.
