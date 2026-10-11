@@ -9,7 +9,7 @@ type Beat = { agent: Exclude<AgentId, 'system'>; text: string; kind: string };
 
 const SCRIPT: Beat[] = [
   { agent: 'lead', kind: 'step', text: 'Work order: company brief on Linear, for a sales call next week.' },
-  { agent: 'cfo', kind: 'money', text: 'Quoted $2. Hard cap: $0.30. Nobody spends past it.' },
+  { agent: 'cfo', kind: 'money', text: 'Quoted $5. Hard cap: $0.51. Nobody spends past it.' },
   { agent: 'records', kind: 'tool', text: 'Database: founded 2019, 291 staff, CEO Karri Saarinen.' },
   { agent: 'field', kind: 'tool', text: 'Reading linear.app/about on my own. Founded 2019.' },
   { agent: 'arbiter', kind: 'resolve', text: '4 facts agree, 3 from one angle. Nothing to settle.' },

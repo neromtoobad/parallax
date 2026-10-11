@@ -12,7 +12,7 @@ const BUDGET_HEADROOM = 2.5; // the hard cap, as a multiple of expected cost
 
 /** Starting estimates before there's any history, in USD per unit. */
 const PRIOR: Record<ServiceId, { perUnit: number; minPrice: number; unit: string }> = {
-  'company-brief': { perUnit: 0.12, minPrice: 2, unit: 'brief' },
+  'company-brief': { perUnit: 0.12, minPrice: 5, unit: 'brief' },
   'lead-list': { perUnit: 0.05, minPrice: 2, unit: 'lead' },
   // ~3 person searches + up to 8 web searches (1 credit each) + a fast and a smart model call.
   'people-map': { perUnit: 0.15, minPrice: 3, unit: 'map' },
