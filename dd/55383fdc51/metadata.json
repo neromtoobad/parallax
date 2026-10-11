@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "dd55383fdc51",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "server/src/services/company-brief.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/dd/55383fdc51/0/metadata.json",
+      "transcript": "/dd/55383fdc51/0/full.jsonl",
+      "compact_transcript": "/dd/55383fdc51/0/transcript.jsonl",
+      "content_hash": "/dd/55383fdc51/0/content_hash.txt",
+      "prompt": "/dd/55383fdc51/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 72,
+    "cache_creation_tokens": 43087,
+    "cache_read_tokens": 9952683,
+    "output_tokens": 15965,
+    "api_call_count": 36
+  }
+}
