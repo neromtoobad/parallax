@@ -3,31 +3,11 @@ import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import { history, quote, unitsOf } from './agents/cfo.ts';
 import { env } from './env.ts';
-import { approveMore, runJob } from './runner.ts';
-import { getJob, listJobs, newId, onEvent, onJob, readEvents, saveJob } from './store.ts';
-import { emptySpend, type Job, type ServiceId } from './types.ts';
+import { approveMore, createJob, runJob } from './runner.ts';
+import { getJob, listJobs, onEvent, onJob, readEvents } from './store.ts';
+import type { Job, ServiceId } from './types.ts';
+import { SERVICES } from './catalog.ts';
 
-export const SERVICES: { id: ServiceId; name: string; blurb: string; fields: { name: string; label: string; placeholder: string; type?: string }[] }[] = [
-  {
-    id: 'company-brief',
-    name: 'Company brief',
-    blurb: 'Everything you need before a sales call, pitch or partnership chat. Every fact checked from two angles.',
-    fields: [
-      { name: 'company', label: 'Company', placeholder: 'Linear, or linear.app' },
-      { name: 'purpose', label: 'What is it for?', placeholder: 'Sales call with their Head of Ops next week' },
-    ],
-  },
-  {
-    id: 'lead-list',
-    name: 'Lead list',
-    blurb: 'Companies that fit your ideal customer, each with the right person to contact. Every lead checked from two angles.',
-    fields: [
-      { name: 'icp', label: 'Who are you looking for?', placeholder: 'Seed to Series A fintech startups in Nigeria' },
-      { name: 'titles', label: 'Who should we contact?', placeholder: 'CTO or Head of Engineering' },
-      { name: 'count', label: 'How many leads?', placeholder: '10', type: 'number' },
-    ],
-  },
-];
 
 export const api = new Hono();
 api.use('*', cors());
@@ -43,27 +23,8 @@ api.post('/quote', async (c) => {
   const body = await c.req.json<{ service: ServiceId; input: Record<string, any>; client?: Job['client']; tag?: string }>();
   const svc = SERVICES.find((s) => s.id === body.service);
   if (!svc) return c.json({ error: 'unknown service' }, 400);
-  const input = Object.fromEntries(Object.entries(body.input ?? {}).map(([k, v]) => [k, typeof v === 'string' ? v.trim().slice(0, 500) : v]));
-  if (input.count != null) input.count = Math.max(1, Math.min(25, Number(input.count) || 10));
-  const brief = svc.fields.map((f) => (input[f.name] ? `${f.label} ${input[f.name]}` : '')).filter(Boolean).join('\n');
-  if (!brief) return c.json({ error: 'empty brief' }, 400);
-  const job: Job = {
-    id: newId('job'),
-    service: svc.id,
-    brief,
-    input,
-    client: body.client,
-    status: 'quoted',
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    steps: {},
-    spend: emptySpend(),
-    traces: [],
-    runs: 0,
-    tag: body.tag,
-  };
-  job.quote = quote(job);
-  saveJob(job);
+  const job = createJob(svc.id, body.input ?? {}, { client: body.client, tag: body.tag });
+  if (!job) return c.json({ error: 'empty brief' }, 400);
   return c.json(view(job));
 });
 

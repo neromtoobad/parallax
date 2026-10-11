@@ -1,10 +1,12 @@
 import { setTraceOutput, trace } from 'neatlogs';
 import { BudgetExceeded, short } from './context.ts';
 import { closeBooks } from './agents/cfo.ts';
-import { emit, getJob, listJobs, saveJob } from './store.ts';
+import { emit, getJob, listJobs, newId, saveJob } from './store.ts';
+import { quote } from './agents/cfo.ts';
+import { SERVICES as CATALOG } from './catalog.ts';
 import { runCompanyBrief } from './services/company-brief.ts';
 import { runLeadList } from './services/lead-list.ts';
-import type { Job, ServiceId } from './types.ts';
+import { emptySpend, type Job, type ServiceId } from './types.ts';
 
 const SERVICES: Record<ServiceId, (job: Job) => Promise<any>> = {
   'company-brief': runCompanyBrief,
@@ -17,6 +19,34 @@ const WORKFLOW_NAMES: Record<ServiceId, string> = {
 };
 
 const active = new Set<string>();
+
+/** Open a job from a client's form and have the CFO quote it. Nothing runs until the quote is accepted. */
+export function createJob(service: ServiceId, raw: Record<string, any>, opts: { client?: Job['client']; tag?: string } = {}) {
+  const svc = CATALOG.find((s) => s.id === service);
+  if (!svc) return null;
+  const input = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, typeof v === 'string' ? v.trim().slice(0, 500) : v]));
+  if (input.count != null) input.count = Math.max(1, Math.min(25, Number(input.count) || 10));
+  const brief = svc.fields.map((f) => (input[f.name] ? `${f.label} ${input[f.name]}` : '')).filter(Boolean).join('\n');
+  if (!brief) return null;
+  const job: Job = {
+    id: newId('job'),
+    service,
+    brief,
+    input,
+    client: opts.client,
+    status: 'quoted',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    steps: {},
+    spend: emptySpend(),
+    traces: [],
+    runs: 0,
+    tag: opts.tag,
+  };
+  job.quote = quote(job);
+  saveJob(job);
+  return job;
+}
 
 /**
  * Run (or resume) a job as one neatlogs WORKFLOW trace. Steps already done are skipped, so a job
