@@ -96,38 +96,76 @@ export async function runCompanyBrief(job: Job) {
     return { claims, raw: c ? { name: pick(c, 'basic_info.name'), website: pick(c, 'basic_info.website') } : null };
   });
 
-  // 3b. Field: the open-web view, built only from pages it actually read.
+  // 3b. Field: the open-web view, built only from pages it actually read. Two passes: a broad sweep,
+  // then a targeted search for each fact still missing (gaps decide the next search, not a fixed list).
   const field = await step(job, 'field', 'field', async () => {
-    const queries = [`${name} ${domain}`, `${name} CEO`, `${name} funding round raised`, `${name} employees headquarters founded`];
     const results: WebResult[] = [];
-    for (const q of queries) {
+    const search = async (q: string, sources?: string[]) => {
       say(`Searching the web: "${q}"`, 'tool');
-      results.push(...(await webSearch(q).catch((e) => (say(`search failed, moving on: ${e.message}`, 'recover'), []))));
+      const r = await webSearch(q, sources).catch((e) => (say(`search failed, moving on: ${e.message}`, 'recover'), [] as WebResult[]));
+      results.push(...r);
+      return r;
+    };
+    const pages: Page[] = [];
+    const read = async (urls: string[]) => {
+      const fresh = urls.map(canon).filter((u) => !pages.some((p) => canon(p.url) === u));
+      if (!fresh.length) return;
+      say(`Reading ${fresh.length} page${fresh.length > 1 ? 's' : ''}`, 'tool');
+      const got = await webFetch(fresh).catch((e) => (say(`page fetch failed (${e.message}); working from search snippets`, 'recover'), []));
+      for (const p of got) if (p.ok && p.text.length > 400) pages.push({ id: `P${pages.length + 1}`, url: canon(p.url), title: p.title, text: p.text });
+    };
+    const extract = async (keys: string[]) => {
+      const snippets = dedupe(results).slice(0, 16).map((r, i) => ({ id: `S${i + 1}`, url: canon(r.url), title: r.title, text: `${r.title}. ${r.snippet}` }));
+      const sources = [...pages, ...snippets];
+      const wanted = FACTS.filter((f) => keys.includes(f.key));
+      const out = await json<{ claims: { key: string; value: string | number | null; source: string; quote: string }[] }>({
+        model: env.models.fast,
+        maxTokens: 2000,
+        system:
+          'You are Field, a web researcher. Extract facts about ONE company using only the sources given. Every fact needs the id of the source it came from and a quote copied character-for-character from that source (max 200 chars) that states the fact. If no source states a fact, leave it out. Never use outside knowledge. Ignore sources about a different company with a similar name.',
+        user: `Company: ${name} (${domain})\nFacts wanted (key: meaning):\n${wanted.map((f) => `${f.key}: ${f.label}${f.kind === 'money' ? ' as a number in USD' : f.kind === 'count' ? ' as a number' : ''}`).join('\n')}\n\nSources:\n${sources.map((p) => `[${p.id}] ${p.url}\n${focus(p.text, name)}`).join('\n\n')}\n\nReturn {"claims": [{"key", "value", "source": "<id>", "quote"}]}`,
+        check: (v) => (!Array.isArray(v?.claims) ? 'claims must be an array' : v.claims.some((c: any) => !c.quote || !c.source) ? 'every claim needs source and quote' : null),
+      });
+      const byId = new Map(sources.map((p) => [p.id, p]));
+      return {
+        claims: out.claims
+          .filter((c) => wanted.some((f) => f.key === c.key) && byId.has(c.source))
+          .map((c) => ({ key: c.key, value: c.value, source: byId.get(c.source)!.url, quote: c.quote }) as Claim),
+        sources,
+      };
+    };
+
+    // Pass 1: the company's own site and the obvious searches.
+    await search(`${name} ${domain}`);
+    await search(`${name} ${domain} CEO founder`);
+    const news = await webSearch(`${name} ${domain}`, ['news']).catch(() => [] as WebResult[]);
+    await read(pickPages(domain, results, 3));
+    let { claims, sources } = await extract(FACTS.map((f) => f.key));
+
+    // Pass 2: one targeted search per missing fact, then read the best new page.
+    const missing = FACTS.filter((f) => !claims.some((c) => c.key === f.key)).map((f) => f.key);
+    const GAP: Record<string, [string, string[]?]> = {
+      founded: [`${name} ${domain} founded in`],
+      hq: [`${name} ${domain} headquarters`],
+      headcount: [`${name} ${domain} number of employees`],
+      funding_total: [`${name} raises funding total raised`, ['news']],
+      last_round: [`${name} raises Series round`, ['news']],
+      ceo: [`${name} ${domain} CEO`],
+    };
+    const queries = [...new Map(missing.filter((k) => GAP[k]).map((k) => [GAP[k][0], GAP[k]])).values()].slice(0, 3);
+    if (queries.length) {
+      say(`Still missing ${missing.join(', ')}; searching for those directly`, 'step');
+      const fresh: WebResult[] = [];
+      for (const [q, src] of queries) fresh.push(...(await search(q, src)));
+      await read(pickPages(domain, fresh, 2, pages.map((p) => p.url)));
+      const more = await extract(missing);
+      claims = [...claims, ...more.claims];
+      sources = more.sources;
     }
-    const news = await webSearch(`${name}`, ['news']).catch(() => [] as WebResult[]);
-    const urls = pickPages(domain, results);
-    say(`Reading ${urls.length} pages`, 'tool');
-    const fetched = await webFetch(urls).catch((e) => (say(`page fetch failed (${e.message}); working from search snippets`, 'recover'), []));
-    const pages: Page[] = [
-      ...fetched.filter((p) => p.ok).map((p, i) => ({ id: `P${i + 1}`, url: p.url, title: p.title, text: p.text })),
-      ...dedupe(results).slice(0, 14).map((r, i) => ({ id: `S${i + 1}`, url: r.url, title: r.title, text: `${r.title}. ${r.snippet}` })),
-    ];
-    const out = await json<{ claims: { key: string; value: string | number | null; source: string; quote: string }[] }>({
-      model: env.models.fast,
-      maxTokens: 2000,
-      system:
-        'You are Field, a web researcher. Extract facts about ONE company using only the sources given. Every fact needs the id of the source it came from and a quote copied character-for-character from that source (max 200 chars) that states the fact. If no source states a fact, leave it out. Never use outside knowledge.',
-      user: `Company: ${name} (${domain})\nFacts wanted (key: meaning):\n${FACTS.map((f) => `${f.key}: ${f.label}${f.kind === 'money' ? ' as a number in USD' : f.kind === 'count' ? ' as a number' : ''}`).join('\n')}\n\nSources:\n${pages.map((p) => `[${p.id}] ${p.url}\n${focus(p.text, name)}`).join('\n\n')}\n\nReturn {"claims": [{"key", "value", "source": "<id>", "quote"}]}`,
-      check: (v) => (!Array.isArray(v?.claims) ? 'claims must be an array' : v.claims.some((c: any) => !c.quote || !c.source) ? 'every claim needs source and quote' : null),
-    });
-    const byId = new Map(pages.map((p) => [p.id, p]));
-    const claims: Claim[] = out.claims
-      .filter((c) => FACTS.some((f) => f.key === c.key) && byId.has(c.source))
-      .map((c) => ({ key: c.key, value: c.value, source: byId.get(c.source)!.url, quote: c.quote }));
-    say(`Field found ${claims.length} of ${FACTS.length} facts on ${pages.length} sources`);
+    say(`Field found ${claims.length} of ${FACTS.length} facts on ${sources.length} sources`);
     return {
       claims,
-      pages: pages.map((p) => ({ id: p.id, url: p.url, title: p.title, text: p.text.slice(0, 20_000) })),
+      pages: sources.map((p) => ({ id: p.id, url: p.url, title: p.title, text: p.text.slice(0, 20_000) })),
       news: news.slice(0, 5),
     };
   });
@@ -159,8 +197,9 @@ export async function runCompanyBrief(job: Job) {
 
   // 5. Verifier: a web fact only counts if its quote is really on the page and really says the value.
   const checked = await step(job, 'verifier', 'verify', async () => {
-    // Snippets first, so a fully fetched page with the same URL wins.
-    const pageText = new Map<string, string>([...field.pages].reverse().map((p: Page) => [p.url, p.text]));
+    // A URL can appear as a fetched page and as a search snippet; a quote may come from either.
+    const pageText = new Map<string, string>();
+    for (const p of field.pages as Page[]) pageText.set(canon(p.url), (pageText.get(canon(p.url)) ?? '') + '\n' + p.text);
     for (const item of resolved) {
       const web = item.chosen === 'tiebreak' ? item.tiebreak : item.chosen === 'field' || item.chosen === 'both' ? item.field : undefined;
       if (item.chosen === 'records') {
@@ -173,7 +212,7 @@ export async function runCompanyBrief(job: Job) {
         item.check = 'no source';
         continue;
       }
-      const text = web.source === 'crustdata' ? '' : (pageText.get(web.source) ?? (item.tiebreak as any)?.page ?? '');
+      const text = web.source === 'crustdata' ? '' : (pageText.get(canon(web.source)) ?? (item.tiebreak as any)?.page ?? '');
       const onPage = web.quote ? quoteOnPage(web.quote, text) : false;
       const says = web.quote ? quoteSupports(kindOf(item.key), item.value, web.quote) : false;
       if (onPage && says) {
@@ -206,7 +245,7 @@ export async function runCompanyBrief(job: Job) {
         model: env.models.smart,
         maxTokens: 1500,
         system:
-          'You write sharp, specific briefing notes. Use ONLY the verified facts given. Each point must cite the fact keys it relies on. Do not add numbers, names or dates that are not in the cited facts. 4-6 points, each one or two sentences, aimed at the purpose.',
+          'You write sharp, specific briefing notes for someone walking into a meeting. Use ONLY the verified facts given. Each point states facts plainly and then gives one concrete thing to do or ask in the meeting because of them. Each point must cite the fact keys it relies on. Never guess about the company: no "likely", "probably", "may", "might", "could", "suggests", "seems", "potentially", "will resonate". Do not add numbers, names or dates that are not in the cited facts. 4-6 points, each one or two sentences.',
         user: `Company: ${name}\nPurpose: ${intake.purpose}\nWhat the client wants to know: ${intake.angles.join('; ')}\nVerified facts:\n${facts.map((f) => `[${f.key}] ${f.label}: ${f.value}`).join('\n')}\nRecent news headlines (may use, cite as "news"):\n${field.news.map((n: WebResult) => `- ${n.title}`).join('\n')}${problems ? `\n\nYour last draft was rejected:\n${problems}` : ''}\n\nReturn {"points": [{"text", "cites": [keys]}]}`,
         check: (v) => (!Array.isArray(v?.points) || !v.points.length ? 'points must be a non-empty array' : null),
       });
@@ -258,12 +297,16 @@ async function tiebreak(name: string, domain: string, f: (typeof FACTS)[number],
   return { value: r.value, chosen: 'records' as const, reason: `unresolved, kept the database value (${v.reason})` };
 }
 
+const HEDGES = /\b(likely|probably|possibly|perhaps|may|might|could|suggests?|suggesting|presumably|appears to|seems?|will resonate|potentially)\b/i;
+
 /** Plain-code audit of a draft: citations exist, numbers in the text match the cited facts. */
 function auditPoints(points: { text: string; cites: string[] }[], facts: Resolved[], news: WebResult[]) {
   const issues: string[] = [];
   const keys = new Map(facts.map((f) => [f.key, f]));
   const newsText = news.map((n) => `${n.title} ${n.snippet}`).join(' ').toLowerCase();
   points.forEach((p, i) => {
+    const hedges = p.text.match(HEDGES);
+    if (hedges) issues.push(`point ${i + 1}: guesses ("${hedges[0]}"); state the fact and a concrete action instead`);
     const cited = (p.cites ?? []).filter((c) => c !== 'news');
     const missing = cited.filter((c) => !keys.has(c));
     if (!p.cites?.length) issues.push(`point ${i + 1}: cites nothing`);
@@ -312,17 +355,35 @@ export function personOf(p: any) {
   };
 }
 
-const SKIP = /linkedin\.com|facebook\.com|instagram\.com|x\.com|twitter\.com|youtube\.com|tiktok\.com|glassdoor\./i;
+const SKIP = /linkedin\.com|facebook\.com|instagram\.com|x\.com|twitter\.com|youtube\.com|tiktok\.com|glassdoor\.|reddit\.com|quora\.com|apps\.apple\.com|play\.google\.com/i;
 
-function pickPages(domain: string, results: WebResult[]) {
-  const urls = [`https://${domain}`];
-  const own = results.filter((r) => r.url.includes(domain) && !SKIP.test(r.url));
-  const about = own.find((r) => /about|company|team|leadership/i.test(r.url));
-  if (about) urls.push(about.url);
-  for (const r of dedupe(results)) {
-    if (urls.length >= 5) break;
-    if (!SKIP.test(r.url) && !urls.includes(r.url) && !/\.pdf$/i.test(r.url)) urls.push(r.url);
+/** One spelling per page: no scheme differences, no www, no trailing slash, no tracking params. */
+export function canon(url: string) {
+  try {
+    const u = new URL(url);
+    u.hash = '';
+    for (const k of [...u.searchParams.keys()]) if (/^utm_|^ref$|^src$/.test(k)) u.searchParams.delete(k);
+    return `https://${u.host.replace(/^www\./, '')}${u.pathname.replace(/\/+$/, '')}${u.search}`;
+  } catch {
+    return url;
   }
+}
+
+function pickPages(domain: string, results: WebResult[], max: number, have: string[] = []) {
+  const seen = new Set(have.map(canon));
+  const urls: string[] = [];
+  const add = (u: string) => {
+    const c = canon(u);
+    if (!seen.has(c) && urls.length < max) {
+      seen.add(c);
+      urls.push(c);
+    }
+  };
+  if (!have.length) add(`https://${domain}`);
+  const ok = results.filter((r) => r?.url && !SKIP.test(r.url) && !/\.pdf$/i.test(r.url));
+  const about = ok.find((r) => r.url.includes(domain) && /about|company|team|leadership/i.test(r.url));
+  if (about) add(about.url);
+  for (const r of ok) add(r.url);
   return urls;
 }
 

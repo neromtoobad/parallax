@@ -74,6 +74,8 @@ export function quoteOnPage(quote: string, page: string): boolean {
   const q = squash(quote), p = squash(page);
   if (!q || q.length < 8) return false;
   if (p.includes(q)) return true;
+  // HTML-to-text can drop or add spaces between tags ("Karri SaarinenCo-founder"); compare without them.
+  if (p.replace(/ /g, '').includes(q.replace(/ /g, ''))) return true;
   const qw = q.split(' ');
   if (qw.length < 5) return false;
   const pw = p.split(' ');

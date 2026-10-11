@@ -1,3 +1,5 @@
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
@@ -60,6 +62,9 @@ api.get('/jobs/:id', (c) => {
 api.get('/jobs/:id/events', (c) => {
   const id = c.req.param('id');
   if (!getJob(id)) return c.json({ error: 'not found' }, 404);
+  // no-transform: proxies (Next's rewrite included) must not gzip-buffer the stream.
+  c.header('Cache-Control', 'no-cache, no-transform');
+  c.header('X-Accel-Buffering', 'no');
   return streamSSE(c, async (stream) => {
     for (const e of readEvents(id)) await stream.writeSSE({ event: 'event', data: JSON.stringify(e) });
     const queue: string[] = [];
@@ -116,6 +121,12 @@ api.get('/books', (c) => {
   });
 });
 
+api.get('/evals', (c) => {
+  const dir = join(env.root, 'server/evals/results');
+  if (!existsSync(dir)) return c.json([]);
+  return c.json(readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8'))));
+});
+
 function summary(j: Job) {
   return {
     id: j.id,
@@ -134,7 +145,19 @@ function summary(j: Job) {
 
 function view(j: Job) {
   const { steps, ...rest } = j;
-  // Field's fetched pages are big; the client only needs the step list.
+  // Field's fetched pages are big; the client gets the step list plus the live, partial work.
   const s = Object.values(steps).map(({ output, ...m }) => m);
-  return { ...rest, steps: s };
+  const out = (k: string) => (steps[k]?.status === 'done' ? (steps[k].output as any) : undefined);
+  const live = {
+    intake: out('intake'),
+    company: out('resolve'),
+    records: out('records')?.claims,
+    field: out('field')?.claims,
+    sources: out('field')?.pages?.map((p: any) => ({ id: p.id, url: p.url, title: p.title })),
+    facts: out('verify'),
+    leads: Object.keys(steps)
+      .filter((k) => k.startsWith('check:') && steps[k].status === 'done')
+      .map((k) => steps[k].output),
+  };
+  return { ...rest, steps: s, live };
 }
