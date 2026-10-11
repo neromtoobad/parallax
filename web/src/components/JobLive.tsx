@@ -164,13 +164,18 @@ function Generic({ job }: { job: JobView }) {
                   </div>
                 </div>
                 {it.fields && (
-                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 8, fontSize: 13 }}>
-                    {Object.entries(it.fields).map(([k2, v2]) => (
-                      <span key={k2}>
-                        <span className="muted">{k2}:</span> {String(v2)}
-                      </span>
-                    ))}
-                  </div>
+                  <>
+                    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 8, fontSize: 13 }}>
+                      {Object.entries(it.fields)
+                        .filter(([k2, v2]) => k2 !== 'why' && v2 !== '' && v2 != null && typeof v2 !== 'boolean' && v2 !== 'true' && v2 !== 'false')
+                        .map(([k2, v2]) => (
+                          <span key={k2}>
+                            <span className="muted">{k2.replace(/([A-Z])/g, ' $1').toLowerCase()}:</span> {String(v2)}
+                          </span>
+                        ))}
+                    </div>
+                    {it.fields.why && <p style={{ fontSize: 14, color: 'var(--ink-2)', margin: '8px 0 0' }}>{String(it.fields.why)}</p>}
+                  </>
                 )}
                 {it.dropReason && <div style={{ color: 'var(--conflict)', fontSize: 13, marginTop: 6 }}>{it.dropReason}</div>}
               </div>
