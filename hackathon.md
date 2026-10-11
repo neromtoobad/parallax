@@ -153,6 +153,13 @@ Trace IDs for every row are in `server/evals/v1-vs-v2.md`.
   - Three durable facts were recorded and recalled: the session capture rule, the free-first page reads, and the CFO pricing rule.
   - The agent guides tell every coding agent to start with `entire brain brief`.
 
+### Production check, and the HQ bug it found
+
+- **End-to-end check on Railway.** A real company brief on Supabase went through quote, live run, both angles side by side, verdicts, write-up and the CFO's books. It was delivered in about 1.6 minutes for $0.165 against a $2 price, with 7/7 facts verified and 3 conflicts settled (trace `243dde8738e16400ad66976315600f01`).
+- **Bug: the Arbiter picked the wrong headquarters.** The database said US and the web said San Francisco, but the Arbiter chose Singapore, because Supabase's terms of service name a Singapore legal entity. It treated "where it's incorporated" as "where it's based".
+- **Fix:** the Arbiter now gets a definition with each fact it settles. For HQ, the definition says that place of incorporation is not the headquarters. Re-run locally, the same brief now says "based in San Francisco" (trace `efb2ad280d4a8817d9c3b87672c31d4c`).
+- **Still open:** the Writer built on the bad HQ ("a presence in the Asia-Pacific market"). That's an inference the guesswork audit doesn't catch, because it only looks for hedging words.
+
 ## Demo
 
 Pending.

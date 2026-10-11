@@ -25,6 +25,13 @@ export const FACTS: { key: string; label: string; kind: Kind }[] = [
 ];
 const kindOf = (key: string) => FACTS.find((f) => f.key === key)?.kind ?? 'text';
 
+/** What a fact means, for the Arbiter. A Singapore legal entity in Supabase's terms of service once beat "San Francisco" for HQ. */
+const MEANING: Record<string, string> = {
+  hq: "the city where the company's main office and leadership are based. Where a legal entity is incorporated (terms of service, privacy policy, company registry) is not the headquarters.",
+  headcount: 'how many people work there now.',
+  last_round: 'the most recent priced funding round (amount and date).',
+};
+
 interface Intake {
   name: string;
   domain: string | null;
@@ -295,7 +302,7 @@ async function tiebreak(name: string, domain: string, f: (typeof FACTS)[number],
     model: env.models.smart,
     system:
       "You are the Arbiter. Two independent researchers disagree on one fact. Decide using the evidence. Prefer the more recent and the more primary source (the company's own site or a filing beats an aggregator). If the new sources settle it, cite one with an exact quote. If nothing settles it, say unknown.",
-    user: `Company: ${name} (${domain})\nFact: ${f.label}\nDatabase (Crustdata${r.asOf ? `, as of ${r.asOf}` : ''}): ${r.value}\nWeb (${w.source}): ${w.value}, quote: "${w.quote}"\nNew evidence:\n${sources.map((s) => `[${s.id}] ${s.url}\n${s.text}`).join('\n\n')}\n\nReturn {"value", "side": "records"|"field"|"new"|"unknown", "source": "<id or null>", "quote": "<exact quote or null>", "reason": "<one sentence>"}`,
+    user: `Company: ${name} (${domain})\nFact: ${f.label}${MEANING[f.key] ? `, meaning ${MEANING[f.key]}` : ''}\nDatabase (Crustdata${r.asOf ? `, as of ${r.asOf}` : ''}): ${r.value}\nWeb (${w.source}): ${w.value}, quote: "${w.quote}"\nNew evidence:\n${sources.map((s) => `[${s.id}] ${s.url}\n${s.text}`).join('\n\n')}\n\nReturn {"value", "side": "records"|"field"|"new"|"unknown", "source": "<id or null>", "quote": "<exact quote or null>", "reason": "<one sentence>"}`,
     check: (x) => (!['records', 'field', 'new', 'unknown'].includes(x?.side) ? 'side must be records, field, new or unknown' : !x.reason ? 'reason required' : null),
   });
   const src = sources.find((s) => s.id === v.source);
