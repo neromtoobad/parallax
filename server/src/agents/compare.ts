@@ -55,7 +55,7 @@ export function same(kind: Kind, a: unknown, b: unknown): boolean {
 
 export function roundType(s: string) {
   const t = s.toLowerCase();
-  const m = t.match(/series\s*([a-h])\b/) ?? t.match(/\b(seed|pre-seed|ipo|angel|debt|grant|private equity|acquired)\b/);
+  const m = t.match(/series\s*([a-h])\b/) ?? t.match(/\b(seed|pre-seed|ipo|angel|debt|grant|private equity|acquired|secondary)\b/);
   if (!m) return '';
   return m[0].startsWith('series') ? `series ${m[1]}` : m[1];
 }

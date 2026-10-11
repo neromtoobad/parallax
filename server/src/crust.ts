@@ -41,7 +41,7 @@ async function call<T>(path: string, body: unknown, estCredits = 1): Promise<T> 
         let msg = text.slice(0, 200);
         try {
           const j = JSON.parse(text);
-          msg = j.description ?? j.reason ?? j.error ?? msg;
+          msg = j.error?.message ?? j.description ?? j.reason ?? (typeof j.error === 'string' ? j.error : msg);
         } catch {}
         throw new CrustError(res.status, `${path} ${res.status}: ${msg}`);
       }
@@ -69,7 +69,7 @@ export const COMPANY_FIELDS = [
   'basic_info.description',
   'basic_info.year_founded',
   'basic_info.employee_count_range',
-  'basic_info.industries',
+  'taxonomy.professional_network_industry',
   'headcount.total',
   'locations.headquarters',
   'locations.country',
