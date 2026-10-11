@@ -3,6 +3,7 @@
 ## Project
 
 - **Name:** Parallax
+- **Live:** https://useparallax.xyz (Railway)
 - **Purpose:** an AI agency whose agents finish a research job end to end and check every answer from two independent angles before delivering it.
 - **Problem:** research agents sound confident and are often wrong (stale headcount, a CEO who left last year, a "lead" who changed jobs). One source can't tell you it's wrong. Two independent sources that disagree can.
 

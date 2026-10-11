@@ -6,6 +6,8 @@ Research agents sound sure of themselves and are often wrong: stale headcounts, 
 
 Parallax is a team of agents you hire for a research job. They do the whole job, start to finish, and every fact is seen from two angles and checked at its source before it reaches you.
 
+**Live: [useparallax.xyz](https://useparallax.xyz)**
+
 > Built for [neatHack](https://neatlogs.com/hackathon), Oct 10–12 2026. Build log, evidence and submission checklist: [hackathon.md](hackathon.md).
 
 ## The team
