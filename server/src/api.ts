@@ -3,12 +3,14 @@ import { join } from 'node:path';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
-import { history, quote, unitsOf } from './agents/cfo.ts';
+import { history, quote, unitName, unitsOf } from './agents/cfo.ts';
 import { env } from './env.ts';
 import { approveMore, createJob, runJob } from './runner.ts';
 import { getJob, listJobs, onEvent, onJob, readEvents } from './store.ts';
 import type { Job, ServiceId } from './types.ts';
 import { SERVICES } from './catalog.ts';
+import { BRIEFS } from '../evals/cases.ts';
+import { goldScore } from '../evals/score.ts';
 
 
 export const api = new Hono();
@@ -57,6 +59,12 @@ api.get('/jobs', (c) => c.json(listJobs().slice(0, 100).map(summary)));
 api.get('/jobs/:id', (c) => {
   const job = getJob(c.req.param('id'));
   return job ? c.json(view(job)) : c.json({ error: 'not found' }, 404);
+});
+
+/** The full event log as plain JSON, for replays. */
+api.get('/jobs/:id/log', (c) => {
+  const id = c.req.param('id');
+  return getJob(id) ? c.json(readEvents(id)) : c.json({ error: 'not found' }, 404);
 });
 
 api.get('/jobs/:id/events', (c) => {
@@ -108,7 +116,7 @@ api.get('/books', (c) => {
     return {
       service: s.id,
       jobs: h.length,
-      unit: s.id === 'lead-list' ? 'lead' : 'brief',
+      unit: unitName(s.id),
       medianCostPerUnit: units.length ? units[Math.floor(units.length / 2)] : null,
       p75CostPerUnit: units.length ? units[Math.min(units.length - 1, Math.floor(units.length * 0.75))] : null,
       nextQuote: quote({ service: s.id, input: { count: 10 } }),
@@ -124,7 +132,22 @@ api.get('/books', (c) => {
 api.get('/evals', (c) => {
   const dir = join(env.root, 'server/evals/results');
   if (!existsSync(dir)) return c.json([]);
-  return c.json(readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8'))));
+  // Gold scores recomputed with the current gold set (same rule as scripts/compare.ts): single-run jobs only.
+  return c.json(
+    readdirSync(dir)
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8')))
+      .map((e) => ({
+        ...e,
+        rows: e.rows.map((r: any) => {
+          const k = BRIEFS.find((b) => b.id === r.case);
+          const job = r.service === 'company-brief' && k ? getJob(r.jobId) : undefined;
+          if (!job || job.runs !== 1 || !job.result) return r;
+          const g = goldScore(k!, job.result.facts ?? []);
+          return { ...r, goldRight: g.filter((x) => x === 'right').length, goldWrong: g.filter((x) => x === 'wrong').length };
+        }),
+      })),
+  );
 });
 
 function summary(j: Job) {
@@ -157,6 +180,10 @@ function view(j: Job) {
     facts: out('verify'),
     leads: Object.keys(steps)
       .filter((k) => k.startsWith('check:') && steps[k].status === 'done')
+      .map((k) => steps[k].output),
+    // Newer services: each checked person, competitor or company as it lands.
+    items: Object.keys(steps)
+      .filter((k) => /^(check|confirm|teardown):/.test(k) && steps[k].status === 'done' && j.service !== 'lead-list')
       .map((k) => steps[k].output),
   };
   return { ...rest, steps: s, live };

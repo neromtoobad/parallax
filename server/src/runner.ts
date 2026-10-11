@@ -6,16 +6,31 @@ import { quote } from './agents/cfo.ts';
 import { SERVICES as CATALOG } from './catalog.ts';
 import { runCompanyBrief } from './services/company-brief.ts';
 import { runLeadList } from './services/lead-list.ts';
+import { runPeopleMap } from './services/people-map.ts';
+import { runCompetitorTeardown } from './services/competitor-teardown.ts';
+import { runMarketMap } from './services/market-map.ts';
+import { runVendorCheck } from './services/vendor-check.ts';
+import { runPersonCheck } from './services/person-check.ts';
 import { emptySpend, type Job, type ServiceId } from './types.ts';
 
 const SERVICES: Record<ServiceId, (job: Job) => Promise<any>> = {
   'company-brief': runCompanyBrief,
   'lead-list': runLeadList,
+  'people-map': runPeopleMap,
+  'competitor-teardown': runCompetitorTeardown,
+  'market-map': runMarketMap,
+  'vendor-check': runVendorCheck,
+  'person-check': runPersonCheck,
 };
 
 const WORKFLOW_NAMES: Record<ServiceId, string> = {
   'company-brief': 'company-brief',
   'lead-list': 'lead-list',
+  'people-map': 'people-map',
+  'competitor-teardown': 'competitor-teardown',
+  'market-map': 'market-map',
+  'vendor-check': 'vendor-check',
+  'person-check': 'person-check',
 };
 
 const active = new Set<string>();

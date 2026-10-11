@@ -75,8 +75,10 @@ export const COMPANY_FIELDS = [
   'locations.country',
 ];
 
-export const companySearch = tool('crustdata.company_search', async (q: { query: string; country?: string; minStaff?: number | null; maxStaff?: number | null; limit?: number; cursor?: string }) => {
-  const body: any = { search: { query: q.query, mode: 'hybrid' }, fields: COMPANY_FIELDS, limit: q.limit ?? 10 };
+export const FUNDING_FIELDS = ['funding.total_investment_usd', 'funding.last_round_type', 'funding.last_fundraise_date'];
+
+export const companySearch = tool('crustdata.company_search', async (q: { query: string; country?: string; minStaff?: number | null; maxStaff?: number | null; limit?: number; cursor?: string; fields?: string[]; mode?: 'hybrid' | 'semantic' | 'lexical' }) => {
+  const body: any = { search: { query: q.query, mode: q.mode ?? 'hybrid' }, fields: q.fields ?? COMPANY_FIELDS, limit: q.limit ?? 10 };
   const conds: any[] = [];
   if (q.country) conds.push({ field: 'locations.country', type: 'in', value: countryNames(q.country) });
   if (q.minStaff) conds.push({ field: 'headcount.total', type: '=>', value: Math.floor(q.minStaff * 0.8) });
@@ -120,13 +122,19 @@ export const PERSON_FIELDS = [
   'experience.employment_details.current',
 ];
 
-export const peopleAt = tool('crustdata.person_search', async (q: { domain: string; titles: string[]; limit?: number }) => {
+export const peopleAt = tool('crustdata.person_search', async (q: { domain: string; titles: string[]; limit?: number; functions?: string[]; seniority?: string[] }) => {
   // "VP Engineering" should find "VP of Engineering": every word of a title must appear, in any order.
   const titleConds = q.titles.map((t) => {
     const words = t.split(/[\s,&/]+/).filter((w) => w.length > 1 && !/^(of|and|the|for)$/i.test(w));
     const conds = words.map((w) => ({ field: 'experience.employment_details.current.title', type: '(.)', value: w }));
     return conds.length === 1 ? conds[0] : { op: 'and', conditions: conds };
   });
+  // A function (e.g. "Human Resources") at a senior level also counts, for titles nobody thought to list.
+  if (q.functions?.length) {
+    const fn: any[] = [{ field: 'experience.employment_details.current.function_category', type: 'in', value: q.functions }];
+    if (q.seniority?.length) fn.push({ field: 'experience.employment_details.current.seniority_level', type: 'in', value: q.seniority });
+    titleConds.push(fn.length === 1 ? fn[0] : { op: 'and', conditions: fn });
+  }
   const body = {
     filters: {
       op: 'and',
@@ -140,6 +148,11 @@ export const peopleAt = tool('crustdata.person_search', async (q: { domain: stri
   };
   return call<{ profiles: any[] }>('/person/search', body, 0.3);
 });
+
+/** Any person search: the caller builds the filters (name lookups, past employers). */
+export const personSearch = tool('crustdata.person_search', async (filters: any, opts: { fields?: string[]; limit?: number } = {}) =>
+  call<{ profiles: any[] }>('/person/search', { filters, fields: opts.fields ?? PERSON_FIELDS, limit: opts.limit ?? 5 }, 0.3),
+);
 
 // ---- Web -----------------------------------------------------------------------------------
 

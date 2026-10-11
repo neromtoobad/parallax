@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AGENTS, api, cents, fmtValue, host, usd, type AgentId, type Claim, type Fact, type JobEvent, type JobView } from '@/lib/api';
+import { AGENTS, api, cents, fmtValue, host, usd, type Claim, type Fact, type JobEvent, type JobView } from '@/lib/api';
+import { AGENT_IDS, type AgentState, type Pose } from '@/lib/cast';
+import { Studio } from './Studio';
 
 const FACT_LABELS: [string, string][] = [
   ['what', 'What they do'],
@@ -31,26 +33,175 @@ export function JobLive({ id }: { id: string }) {
     return () => es.close();
   }, [id]);
 
-  if (!job) return <div className="wrap" style={{ padding: 60 }}>Loading…</div>;
+  const states = useMemo(() => (job ? agentStates(job, events) : {}), [job, events]);
 
+  if (!job) return <div className="wrap" style={{ padding: 60 }}>Loading…</div>;
   const running = job.status === 'running';
-  const lastAgent = [...events].reverse().find((e) => e.agent !== 'system')?.agent;
 
   return (
-    <main className="wrap" style={{ padding: '34px 24px' }}>
+    <main className="wrap" style={{ padding: '30px 24px' }}>
       <Header job={job} />
-      <AgentStrip job={job} active={running ? lastAgent : undefined} />
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 360px', gap: 18, marginTop: 18, alignItems: 'start' }}>
-        <div style={{ display: 'grid', gap: 18 }}>
-          {job.service === 'company-brief' ? <Brief job={job} /> : <Leads job={job} />}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 360px', gap: 18, marginTop: 18, alignItems: 'start' }} className="job-grid">
+        <div style={{ display: 'grid', gap: 18, minWidth: 0 }}>
+          <div className="card" style={{ padding: '10px 10px 4px', overflow: 'visible' }}>
+            <Studio states={states} tags />
+          </div>
+          <Headline job={job} />
+          {job.service === 'company-brief' ? <Brief job={job} /> : job.service === 'lead-list' ? <Leads job={job} /> : <Generic job={job} />}
           <Steps job={job} />
         </div>
-        <div style={{ display: 'grid', gap: 18, position: 'sticky', top: 76 }}>
+        <div style={{ display: 'grid', gap: 18, position: 'sticky', top: 80 }}>
           <Money job={job} />
           <Timeline events={events} running={running} />
         </div>
       </div>
     </main>
+  );
+}
+
+const POSE_FOR: Record<string, Pose> = { conflict: 'talk', resolve: 'talk', money: 'talk', check: 'work', retry: 'work', recover: 'work', tool: 'work', step: 'talk', say: 'work', error: 'talk' };
+
+/** Turn the event stream into what each character is doing right now. */
+function agentStates(job: JobView, events: JobEvent[]) {
+  const out: Partial<Record<(typeof AGENT_IDS)[number], AgentState>> = {};
+  for (const a of AGENT_IDS) out[a] = { pose: 'idle' };
+  const last = [...events].reverse().find((e) => e.agent !== 'system');
+  if (job.status === 'delivered') {
+    for (const a of AGENT_IDS) out[a] = { pose: 'done' };
+    const money = [...events].reverse().find((e) => e.kind === 'money');
+    out.cfo = { pose: 'done', on: true, bubble: money ? clip(money.text, 120) : 'Delivered.' };
+    return out;
+  }
+  if (job.status === 'quoted') {
+    out.cfo = { pose: 'talk', on: true, bubble: `Quoted ${usd(job.quote?.priceUsd)}. Waiting for the go-ahead.` };
+    return out;
+  }
+  if (job.status === 'paused') {
+    out.cfo = { pose: 'talk', on: true, bubble: 'Budget reached. Nobody spends another cent until you approve more.' };
+    return out;
+  }
+  if (job.status === 'failed') {
+    const a = (last?.agent ?? 'lead') as (typeof AGENT_IDS)[number];
+    out[a] = { pose: 'talk', on: true, bubble: clip(job.error ?? 'Stopped.', 110) };
+    return out;
+  }
+  if (last && last.agent !== 'system') {
+    const a = last.agent as (typeof AGENT_IDS)[number];
+    const rejecting = a === 'verifier' && /reject|✗|not found|failed|doesn't/i.test(last.text);
+    out[a] = { pose: rejecting ? 'talk' : POSE_FOR[last.kind] ?? 'work', on: true, bubble: clip(last.text, 120) };
+  }
+  return out;
+}
+
+/** One-line answer at the top of the results. */
+function Headline({ job }: { job: JobView }) {
+  const r = job.result;
+  if (!r) return null;
+  const s = r.stats ?? {};
+  const line =
+    r.headline ??
+    (job.service === 'company-brief'
+      ? `${s.verified} of ${s.facts} facts verified on ${job.live.company?.name ?? 'the company'}; ${s.agreed} seen by both angles, ${s.conflicts} disagreement${s.conflicts === 1 ? '' : 's'} settled.`
+      : job.service === 'lead-list'
+        ? `${s.verified} of ${s.wanted} leads verified from ${s.checked} candidates checked.`
+        : 'Delivered.');
+  const v = r.verdict as string | undefined;
+  const vcls = v === 'green' || v === 'confirmed' ? 'agree' : v === 'red' || v === 'mismatch' ? 'conflict' : v ? 'warn' : '';
+  return (
+    <div className="card fade-in" style={{ padding: '18px 22px', display: 'flex', gap: 14, alignItems: 'center', borderColor: v ? `var(--${vcls === 'agree' ? 'agree' : vcls === 'conflict' ? 'conflict' : 'warn'})` : undefined }}>
+      {v && <span className={`pill ${vcls}`} style={{ height: 30, fontSize: 13.5, textTransform: 'uppercase' }}>{v.replace('-', ' ')}</span>}
+      <div style={{ fontSize: 17, fontWeight: 560 }}>{line}</div>
+    </div>
+  );
+}
+
+/** Any service: fact rows, item cards with checks, written points, CSV. */
+function Generic({ job }: { job: JobView }) {
+  const r = job.result ?? {};
+  const items: any[] = r.items ?? [];
+  const facts: Fact[] = r.facts ?? [];
+  const points: { text: string; cites: string[] }[] = r.points ?? [];
+  if (!job.result) return <div className="card pad muted">The team is working. Results appear here as soon as they’re verified.</div>;
+  return (
+    <>
+      {facts.length > 0 && <FactTable rows={facts} />}
+      {items.length > 0 && (
+        <div className="card pad">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
+            <h3>What the team found</h3>
+            <span className="muted" style={{ fontSize: 13 }}>
+              {items.filter((i) => i.status === 'verified').length} verified · {items.filter((i) => i.status !== 'verified').length} dropped
+            </span>
+          </div>
+          {r.csv && (
+            <a className="btn ghost sm" style={{ margin: '4px 0 12px' }} href={`data:text/csv;charset=utf-8,${encodeURIComponent(r.csv)}`} download={`parallax-${job.service}-${job.id}.csv`}>
+              Download CSV
+            </a>
+          )}
+          <div style={{ display: 'grid', gap: 10 }}>
+            {items.map((it, k) => (
+              <div key={k} className="fade-in" style={{ border: '1px solid var(--line)', borderRadius: 14, padding: 14, opacity: it.status === 'verified' ? 1 : 0.7 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontWeight: 650 }}>
+                      {it.link ? (
+                        <a href={it.link} target="_blank" rel="noreferrer" style={{ textDecoration: 'underline', textDecorationColor: 'var(--line-2)' }}>
+                          {it.title}
+                        </a>
+                      ) : (
+                        it.title
+                      )}
+                    </div>
+                    {it.subtitle && <div className="muted" style={{ fontSize: 13.5 }}>{it.subtitle}</div>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                    {(it.checks ?? []).map((c: any) => (
+                      <span key={c.name} className={`pill ${c.ok ? 'agree' : c.severity === 'high' ? 'conflict' : 'warn'}`} title={c.note}>
+                        {c.ok ? '✓' : '·'} {c.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                {it.fields && (
+                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 8, fontSize: 13 }}>
+                    {Object.entries(it.fields).map(([k2, v2]) => (
+                      <span key={k2}>
+                        <span className="muted">{k2}:</span> {String(v2)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {it.dropReason && <div style={{ color: 'var(--conflict)', fontSize: 13, marginTop: 6 }}>{it.dropReason}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {points.length > 0 && <Points points={points} />}
+    </>
+  );
+}
+
+function Points({ points }: { points: { text: string; cites: string[] }[] }) {
+  return (
+    <div className="card pad fade-in">
+      <h3>The write-up</h3>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+        Written only from verified facts. Every line cites them, and a draft that guesses or adds an unverified number is sent back.
+      </p>
+      <ol style={{ paddingLeft: 18, margin: 0, display: 'grid', gap: 10 }}>
+        {points.map((p, i) => (
+          <li key={i}>
+            {p.text}{' '}
+            {p.cites.map((c) => (
+              <span key={c} className="pill" style={{ height: 20, fontSize: 11, marginLeft: 4 }}>
+                {c}
+              </span>
+            ))}
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 
@@ -90,38 +241,6 @@ function Header({ job }: { job: JobView }) {
           </button>
         )}
       </div>
-    </div>
-  );
-}
-
-function AgentStrip({ job, active }: { job: JobView; active?: AgentId }) {
-  const ids: AgentId[] = ['lead', 'cfo', 'records', 'field', 'arbiter', 'verifier', 'writer'];
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0,1fr))', gap: 8, marginTop: 22 }}>
-      {ids.map((a) => {
-        const spent = job.spend.byAgent?.[a]?.usd ?? 0;
-        const on = active === a;
-        return (
-          <div
-            key={a}
-            className="card"
-            style={{
-              padding: '10px 12px',
-              borderColor: on ? AGENTS[a].color : undefined,
-              boxShadow: on ? `0 0 0 3px color-mix(in srgb, ${AGENTS[a].color} 18%, transparent)` : undefined,
-              transition: 'box-shadow .2s, border-color .2s',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 620, color: AGENTS[a].color, fontSize: 14 }}>
-              {on && <span className="dot" style={{ animation: 'pulse 1s infinite' }} />}
-              {AGENTS[a].name}
-            </div>
-            <div className="mono muted" style={{ fontSize: 11.5 }}>
-              {spent ? cents(spent) : '·'}
-            </div>
-          </div>
-        );
-      })}
     </div>
   );
 }
@@ -246,26 +365,35 @@ function Brief({ job }: { job: JobView }) {
   const byKey = (xs: Claim[], k: string) => xs.find((c) => c.key === k);
   const rows = FACT_LABELS.map(([k, label]) => facts?.find((f: Fact) => f.key === k) ?? ({ key: k, label, value: null, agreement: 'neither', chosen: '', reason: '', records: byKey(rec, k), field: byKey(fld, k) } as Fact));
   const points: { text: string; cites: string[] }[] = job.result?.points ?? [];
-
   return (
     <>
-      <div className="card pad">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <h3>Two angles, side by side</h3>
-          {job.result?.stats && (
-            <span className="muted" style={{ fontSize: 13 }}>
-              {job.result.stats.verified}/{job.result.stats.facts} verified · {job.result.stats.agreed} seen by both · {job.result.stats.conflicts} settled
-            </span>
-          )}
-        </div>
-        <table className="t">
+      <FactTable rows={rows} />
+      {points.length > 0 && <Points points={points} />}
+    </>
+  );
+}
+
+/** The two angles side by side, with the verdict for each fact. */
+function FactTable({ rows }: { rows: Fact[] }) {
+  const verified = rows.filter((f) => f.verified).length;
+  const both = rows.filter((f) => f.agreement === 'agree' || f.agreement === 'conflict').length;
+  return (
+    <div className="card pad">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+        <h3>Two angles, side by side</h3>
+        <span className="muted" style={{ fontSize: 13 }}>
+          {verified}/{rows.length} verified · {both} seen by both angles
+        </span>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table className="t" style={{ minWidth: 620 }}>
           <thead>
             <tr>
               <th style={{ width: '17%' }}>Fact</th>
-              <th className="records" style={{ width: '27%' }}>
+              <th className="tc-records" style={{ width: '27%' }}>
                 Records <span className="muted">· database</span>
               </th>
-              <th className="field" style={{ width: '33%' }}>
+              <th className="tc-field" style={{ width: '33%' }}>
                 Field <span className="muted">· open web</span>
               </th>
               <th>Verdict</th>
@@ -274,7 +402,7 @@ function Brief({ job }: { job: JobView }) {
           <tbody>
             {rows.map((f) => (
               <tr key={f.key} className="fade-in">
-                <td style={{ fontWeight: 560 }}>{f.label}</td>
+                <td style={{ fontWeight: 600 }}>{f.label}</td>
                 <td className="mono" style={{ fontSize: 13 }}>
                   {f.records ? clip(fmtValue(f.key, f.records.value), 90) : <span className="muted">·</span>}
                 </td>
@@ -298,28 +426,7 @@ function Brief({ job }: { job: JobView }) {
           </tbody>
         </table>
       </div>
-
-      {points.length > 0 && (
-        <div className="card pad fade-in">
-          <h3>Your brief</h3>
-          <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
-            Written only from verified facts. Every line cites them, and a draft that guesses or adds an unverified number is sent back.
-          </p>
-          <ol style={{ paddingLeft: 18, margin: 0, display: 'grid', gap: 10 }}>
-            {points.map((p, i) => (
-              <li key={i}>
-                {p.text}{' '}
-                {p.cites.map((c) => (
-                  <span key={c} className="pill" style={{ height: 20, fontSize: 11, marginLeft: 4 }}>
-                    {c}
-                  </span>
-                ))}
-              </li>
-            ))}
-          </ol>
-        </div>
-      )}
-    </>
+    </div>
   );
 }
 

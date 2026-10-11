@@ -14,10 +14,23 @@ const BUDGET_HEADROOM = 2.5; // the hard cap, as a multiple of expected cost
 const PRIOR: Record<ServiceId, { perUnit: number; minPrice: number; unit: string }> = {
   'company-brief': { perUnit: 0.12, minPrice: 2, unit: 'brief' },
   'lead-list': { perUnit: 0.05, minPrice: 2, unit: 'lead' },
+  // ~3 person searches + up to 8 web searches (1 credit each) + a fast and a smart model call.
+  'people-map': { perUnit: 0.15, minPrice: 3, unit: 'map' },
+  // A 25-row semantic search, ~6 homepages (free direct fetch first) and 7 extractions + one smart write-up.
+  'competitor-teardown': { perUnit: 0.18, minPrice: 4, unit: 'teardown' },
+  // Per company: a share of the search and screen, one homepage read, one fast model call.
+  'market-map': { perUnit: 0.04, minPrice: 2, unit: 'company' },
+  // Enrich (2 credits), a people search, 3 web searches, a homepage read, one classification call.
+  'vendor-check': { perUnit: 0.08, minPrice: 2, unit: 'check' },
+  // 2-4 small searches, 1 web search, free team-page fetches, one fast model call.
+  'person-check': { perUnit: 0.05, minPrice: 1, unit: 'check' },
 };
 
+/** What one unit of a service is called ("lead", "check"...). */
+export const unitName = (service: ServiceId) => PRIOR[service]?.unit ?? 'job';
+
 export function unitsOf(job: Pick<Job, 'service' | 'input'>) {
-  return job.service === 'lead-list' ? Math.max(1, Number(job.input.count ?? 10)) : 1;
+  return job.service === 'lead-list' || job.service === 'market-map' ? Math.max(1, Number(job.input.count ?? 10)) : 1;
 }
 
 /** Cost per unit for past delivered jobs of a service, newest first. */

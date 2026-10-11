@@ -2,8 +2,11 @@ import { say, step } from '../context.ts';
 import { companyEnrich, companySearch, peopleAt, readPages, webSearch, type WebResult } from '../crust.ts';
 import { env } from '../env.ts';
 import { json } from '../llm.ts';
-import { quoteOnPage, quoteSupports, same, type Kind } from '../agents/compare.ts';
+import { num, quoteOnPage, quoteSupports, same, type Kind } from '../agents/compare.ts';
 import type { Claim, Job, Resolved } from '../types.ts';
+import { auditPoints, canon, clean, dedupe, personOf, pick, place } from './shared.ts';
+
+export { canon, personOf };
 
 /**
  * Company brief: everything you need before a sales call, investor meeting or partnership chat,
@@ -249,7 +252,8 @@ export async function runCompanyBrief(job: Job) {
         user: `Company: ${name}\nPurpose: ${intake.purpose}\nWhat the client wants to know: ${intake.angles.join('; ')}\nVerified facts:\n${facts.map((f) => `[${f.key}] ${f.label}: ${f.value}`).join('\n')}\nRecent news headlines (may use, cite as "news"):\n${field.news.map((n: WebResult) => `- ${n.title}`).join('\n')}${problems ? `\n\nYour last draft was rejected:\n${problems}` : ''}\n\nReturn {"points": [{"text", "cites": [keys]}]}`,
         check: (v) => (!Array.isArray(v?.points) || !v.points.length ? 'points must be a non-empty array' : null),
       });
-      const issues = auditPoints(draft.points, facts, field.news);
+      const newsText = field.news.map((n: WebResult) => `${n.title} ${n.snippet}`).join(' ');
+      const issues = auditPoints(draft.points, { ...Object.fromEntries(facts.map((f) => [f.key, String(f.value ?? '')])), news: newsText });
       if (!issues.length) return { points: draft.points, rounds: round + 1 };
       problems = issues.join('\n');
       say(`Draft ${round + 1} rejected: ${issues.length} problem${issues.length > 1 ? 's' : ''} (${issues[0]})`, 'check');
@@ -259,7 +263,10 @@ export async function runCompanyBrief(job: Job) {
   });
 
   const conflicts = checked.filter((r) => r.agreement === 'conflict');
+  const v = (k: string) => checked.find((r) => r.key === k && r.verified && r.value != null)?.value;
+  const bits = [v('founded') && `founded ${v('founded')}`, v('hq') && `based in ${v('hq')}`, num(v('headcount')) != null && `about ${num(v('headcount'))!.toLocaleString('en-US')} staff`, v('ceo') && `led by ${v('ceo')}`].filter(Boolean);
   return {
+    headline: `${name} (${domain})${bits.length ? `: ${bits.join(', ')}` : ''}. ${checked.filter((r) => r.verified).length} of ${checked.length} facts verified, ${conflicts.length} conflict${conflicts.length === 1 ? '' : 's'} settled.`,
     company: { name, domain },
     purpose: intake.purpose,
     facts: checked,
@@ -297,77 +304,9 @@ async function tiebreak(name: string, domain: string, f: (typeof FACTS)[number],
   return { value: r.value, chosen: 'records' as const, reason: `unresolved, kept the database value (${v.reason})` };
 }
 
-const HEDGES = /\b(likely|probably|possibly|perhaps|may|might|could|suggests?|suggesting|presumably|appears to|seems?|will resonate|potentially)\b/i;
-
-/** Plain-code audit of a draft: citations exist, numbers in the text match the cited facts. */
-function auditPoints(points: { text: string; cites: string[] }[], facts: Resolved[], news: WebResult[]) {
-  const issues: string[] = [];
-  const keys = new Map(facts.map((f) => [f.key, f]));
-  const newsText = news.map((n) => `${n.title} ${n.snippet}`).join(' ').toLowerCase();
-  points.forEach((p, i) => {
-    const hedges = p.text.match(HEDGES);
-    if (hedges) issues.push(`point ${i + 1}: guesses ("${hedges[0]}"); state the fact and a concrete action instead`);
-    const cited = (p.cites ?? []).filter((c) => c !== 'news');
-    const missing = cited.filter((c) => !keys.has(c));
-    if (!p.cites?.length) issues.push(`point ${i + 1}: cites nothing`);
-    if (missing.length) issues.push(`point ${i + 1}: cites unknown or unverified facts ${missing.join(', ')}`);
-    const allowed = cited.map((c) => String(keys.get(c)?.value ?? '')).join(' ').toLowerCase() + ' ' + (p.cites?.includes('news') ? newsText : '');
-    for (const m of p.text.matchAll(/\$?\d[\d,.]*\s*(?:billion|million|bn|m|k|%)?/gi)) {
-      const raw = m[0].trim();
-      const digits = raw.replace(/[^\d.]/g, '').replace(/\.$/, '');
-      if (!digits || digits.length < 2) continue;
-      const n = parseFloat(digits);
-      const close = [...allowed.replace(/,/g, '').matchAll(/\d+(?:\.\d+)?/g)].some((x) => {
-        const v = parseFloat(x[0]);
-        return v === n || (v > 0 && Math.abs(v - n) / v < 0.02) || [1e3, 1e6, 1e9].some((k) => Math.abs(v - n * k) / (n * k) < 0.06);
-      });
-      if (!close) issues.push(`point ${i + 1}: the number "${raw}" isn't in the cited facts`);
-    }
-  });
-  return issues;
-}
-
 // ---- helpers --------------------------------------------------------------------------------
 
-function clean(d: unknown): string | null {
-  if (!d || typeof d !== 'string') return null;
-  return d.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '').trim() || null;
-}
-
-function pick(o: any, path: string) {
-  return path.split('.').reduce((a, k) => (a == null ? a : a[k]), o) ?? null;
-}
-
-function place(v: any): string | null {
-  if (!v) return null;
-  if (typeof v === 'string') return v;
-  return [v.city, v.state, v.country].filter(Boolean).join(', ') || v.raw || null;
-}
-
-export function personOf(p: any) {
-  const cur = p.experience?.employment_details?.current?.[0] ?? {};
-  return {
-    name: p.basic_profile?.name ?? '',
-    title: cur.title ?? p.basic_profile?.headline ?? '',
-    company: cur.name ?? cur.company_name ?? '',
-    since: cur.start_date ?? null,
-    profileUrl: p.social_handles?.professional_network_identifier?.profile_url ?? null,
-  };
-}
-
 const SKIP = /linkedin\.com|facebook\.com|instagram\.com|x\.com|twitter\.com|youtube\.com|tiktok\.com|glassdoor\.|reddit\.com|quora\.com|apps\.apple\.com|play\.google\.com/i;
-
-/** One spelling per page: no scheme differences, no www, no trailing slash, no tracking params. */
-export function canon(url: string) {
-  try {
-    const u = new URL(url);
-    u.hash = '';
-    for (const k of [...u.searchParams.keys()]) if (/^utm_|^ref$|^src$/.test(k)) u.searchParams.delete(k);
-    return `https://${u.host.replace(/^www\./, '')}${u.pathname.replace(/\/+$/, '')}${u.search}`;
-  } catch {
-    return url;
-  }
-}
 
 function pickPages(domain: string, results: WebResult[], max: number, have: string[] = []) {
   const seen = new Set(have.map(canon));
@@ -385,11 +324,6 @@ function pickPages(domain: string, results: WebResult[], max: number, have: stri
   if (about) add(about.url);
   for (const r of ok) add(r.url);
   return urls;
-}
-
-function dedupe(results: WebResult[]) {
-  const seen = new Set<string>();
-  return results.filter((r) => r?.url && !seen.has(r.url) && seen.add(r.url));
 }
 
 /** Keep what matters in a long page: its opening, plus every paragraph that mentions a fact we want. */

@@ -1,4 +1,6 @@
-export type ServiceId = 'company-brief' | 'lead-list';
+export type ServiceId = 'company-brief' | 'lead-list' | 'people-map' | 'competitor-teardown' | 'market-map' | 'vendor-check' | 'person-check';
+
+export type Dept = 'sales' | 'market' | 'trust';
 
 export type AgentId = 'lead' | 'cfo' | 'records' | 'field' | 'arbiter' | 'verifier' | 'writer';
 
@@ -74,6 +76,41 @@ export interface Lead {
   checks: { name: string; ok: boolean; note: string }[];
   status: 'verified' | 'dropped';
   dropReason?: string;
+}
+
+export type Verdict = 'green' | 'amber' | 'red' | 'confirmed' | 'mismatch' | 'not-found';
+
+export interface Check {
+  name: string;
+  ok: boolean;
+  note: string;
+  severity?: 'low' | 'medium' | 'high';
+  source?: string;
+}
+
+/** One row of a deliverable: a person, a competitor, a company, a piece of evidence. */
+export interface Item {
+  title: string;
+  subtitle?: string;
+  link?: string;
+  status: 'verified' | 'dropped';
+  checks: Check[];
+  fields?: Record<string, string>;
+  dropReason?: string;
+}
+
+/** The shape every newer service returns, so the web app can render any of them the same way. */
+export interface Deliverable {
+  headline: string;
+  verdict?: Verdict;
+  facts?: Resolved[];
+  items?: Item[];
+  points?: { text: string; cites: string[] }[];
+  stats: Record<string, number>;
+  csv?: string;
+  partial?: boolean;
+  priceUsd?: number;
+  [extra: string]: unknown;
 }
 
 export interface Job {

@@ -1,11 +1,10 @@
 import { BudgetExceeded, say, step } from '../context.ts';
-import { companySearch, peopleAt, readPages, webSearch } from '../crust.ts';
+import { companySearch, peopleAt, readPages } from '../crust.ts';
 import { json } from '../llm.ts';
 import { quoteOnPage } from '../agents/compare.ts';
-import { personOf } from './company-brief.ts';
 import { emit } from '../store.ts';
 import type { Job, Lead } from '../types.ts';
-import { resolve4, resolve6 } from 'node:dns/promises';
+import { personOf, personOnWeb, rank, screen } from './shared.ts';
 
 /**
  * Lead list: N companies that fit the client's ideal customer, each with the right person to
@@ -69,22 +68,7 @@ export async function runLeadList(job: Job) {
 
       // Screen on the database descriptions first (one cheap model call for the whole page), so
       // credits go only on companies worth checking. Field still has to confirm each one on its own site.
-      const screened = await step(job, 'lead', `screen:${page}`, async () => {
-        const inRange = fresh.filter((c: any) => c.headcount == null || ((intake.headcountMin == null || c.headcount >= intake.headcountMin * 0.8) && (intake.headcountMax == null || c.headcount <= intake.headcountMax * 1.25)));
-        if (inRange.length < fresh.length) say(`${fresh.length - inRange.length} companies outside the ${intake.headcountMin ?? 0}-${intake.headcountMax ?? '∞'} employee range`, 'step');
-        if (!inRange.length) return [];
-        const r = await json<{ keep: { i: number; why: string }[] }>({
-          system: "Screen companies for a client's ideal customer profile using their database descriptions. Keep only clear fits, best first. Drop agencies, consultancies, law firms, foundations, accelerators, freelancers and companies whose description doesn't show the fit. A company that IS the kind of company described is a fit; don't require it to sell to that kind of company unless the profile says so.",
-          user: `Ideal customer: ${intake.icp}\nCandidates:\n${inRange.map((c: any, i: number) => `${i}. ${c.name} (${c.domain}), ${c.headcount ?? '?'} staff, ${c.country ?? '?'}: ${(c.description ?? '').slice(0, 220)}`).join('\n')}\n\nReturn {"keep": [{"i": number, "why": string}]}`,
-          check: (v) => (!Array.isArray(v?.keep) ? 'keep must be an array' : null),
-        });
-        const kept = r.keep.filter((k) => inRange[k.i]).map((k) => inRange[k.i]);
-        // The database still lists companies that are gone. A DNS lookup is free; a page fetch isn't.
-        const alive = await Promise.all(kept.map((c: any) => resolves(c.domain)));
-        const live = kept.filter((_: any, i: number) => alive[i]);
-        say(`Screened ${inRange.length} candidates on their database profiles; ${kept.length} worth checking${live.length < kept.length ? `, ${kept.length - live.length} with dead domains skipped` : ''}`, 'step');
-        return live;
-      });
+      const screened = await step(job, 'lead', `screen:${page}`, () => screen(`Ideal customer: ${intake.icp}`, fresh, { min: intake.headcountMin, max: intake.headcountMax }));
 
       // Three at a time: fast, and well inside Crustdata's per-minute limits.
       for (let i = 0; i < screened.length; i += 3) {
@@ -122,6 +106,7 @@ export async function runLeadList(job: Job) {
 
   const price = job.quote ? Math.max(0.5, Math.round(((job.quote.priceUsd * Math.min(verified.length, want)) / want) * 2) / 2) : 0;
   return {
+    headline: `${verified.length} of ${want} leads verified for ${intake.icp}${verified.length ? `, each with a named contact (${verified.filter((l) => l.checks.find((c) => c.name === 'person on the web')?.ok).length} confirmed on the open web)` : ''}.`,
     partial: verified.length < want,
     priceUsd: price,
     icp: intake.icp,
@@ -173,11 +158,7 @@ async function checkLead(intake: Intake, c: { name: string; domain: string; desc
   if (!person) return drop(ranked.length ? `no one in the right role (closest: ${ranked[0].title})` : 'no contact found');
 
   // Field angle 2: does the open web agree this person is there now?
-  const hits = await webSearch(`"${person.name}" ${c.name}`).catch(() => []);
-  const last = person.name.split(/\s+/).pop()!.toLowerCase();
-  const brand = c.name.toLowerCase().split(/\s+/)[0];
-  const mentions = hits.filter((h) => `${h.title} ${h.snippet}`.toLowerCase().includes(last) && `${h.title} ${h.snippet} ${h.url}`.toLowerCase().includes(brand));
-  const left = mentions.find((h) => new RegExp(`(former|ex-|previously|left|departed|stepped down)[^.]{0,40}${escape(brand)}|${escape(brand)}[^.]{0,40}(former|alum)`, 'i').test(`${h.title} ${h.snippet}`));
+  const { mentions, left } = await personOnWeb(person.name, c.name);
   checks.push({
     name: 'person on the web',
     ok: mentions.length > 0 && !left,
@@ -194,33 +175,8 @@ async function checkLead(intake: Intake, c: { name: string; domain: string; desc
   };
 }
 
-const FILLER = new Set(['of', 'and', 'the', '&', 'for', 'at']);
-const toks = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter((w) => w && !FILLER.has(w));
-
-/** Position of the first wanted title whose every word is a whole word in this title ("CTO" no longer matches "Director"). */
-function rank(title: string, order: string[]) {
-  const t = new Set(toks(title));
-  const i = order.findIndex((o) => {
-    const w = toks(o);
-    return w.length > 0 && w.every((x) => t.has(x) || (x === 'founder' && t.has('cofounder')));
-  });
-  return i < 0 ? 99 : i;
-}
-
-const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
 function toCsv(leads: Lead[]) {
   const rows = [['company', 'domain', 'contact', 'title', 'profile', 'fit', 'web_confirmed']];
   for (const l of leads) rows.push([l.company.name, l.company.domain, l.person?.name ?? '', l.person?.title ?? '', l.person?.profileUrl ?? '', l.fit, String(!!l.checks.find((c) => c.name === 'person on the web')?.ok)]);
   return rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
-}
-
-/** Does the domain resolve at all? Dead companies' domains often don't. */
-async function resolves(domain: string) {
-  const t = new Promise<boolean>((r) => setTimeout(() => r(true), 4000)); // slow DNS: give it the benefit of the doubt
-  const look = Promise.any([resolve4(domain), resolve4(`www.${domain}`), resolve6(domain)]).then(
-    () => true,
-    () => false,
-  );
-  return Promise.race([look, t]);
 }
