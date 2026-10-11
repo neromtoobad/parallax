@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "0080a1345149",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "server/src/agents/cfo.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/00/80a1345149/0/metadata.json",
+      "transcript": "/00/80a1345149/0/full.jsonl",
+      "compact_transcript": "/00/80a1345149/0/transcript.jsonl",
+      "content_hash": "/00/80a1345149/0/content_hash.txt",
+      "prompt": "/00/80a1345149/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 10,
+    "cache_creation_tokens": 4638,
+    "cache_read_tokens": 1916882,
+    "output_tokens": 3147,
+    "api_call_count": 5
+  }
+}
