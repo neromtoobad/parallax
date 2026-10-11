@@ -192,7 +192,7 @@ Pending.
 
 - [x] Public repo with commits dated Oct 10–12: github.com/neromtoobad/parallax (public; all commits Oct 11)
 - [ ] Demo video, 3 min max, covering neatlogs, Entire and cfo.ai
-- [ ] neatlogs traces: a before/after pair with numbers, and a recovery run
+- [x] neatlogs traces: a before/after pair with numbers (`server/evals/v1-vs-v4.md`), and a recovery run, with screenshots in `docs/neatlogs/`
 - [x] Entire checkpoints / entire-graph output: `docs/entire/` (gap: 07:15–09:52 commits uncaptured, explained there)
 - [x] cfo.ai business plan (pricing, costs, revenue, runway): `docs/business-plan.md`, live model at https://cfo.ai/s/otTA-690Qi0JrZV0
 - [ ] Building-in-public posts tagged #neatHack
