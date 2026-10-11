@@ -11,6 +11,11 @@ const SERVICES: Record<ServiceId, (job: Job) => Promise<any>> = {
   'lead-list': runLeadList,
 };
 
+const WORKFLOW_NAMES: Record<ServiceId, string> = {
+  'company-brief': 'company-brief',
+  'lead-list': 'lead-list',
+};
+
 const active = new Set<string>();
 
 /**
@@ -29,7 +34,14 @@ export async function runJob(id: string) {
   emit(job, { agent: 'system', kind: 'status', text: resumed ? `Resumed (run ${job.runs}); ${Object.values(job.steps).filter((s) => s.status === 'done').length} finished steps kept` : 'Job started' });
 
   try {
-    await trace({ name: `job.${job.service}`, kind: 'WORKFLOW', input: { id: job.id, brief: job.brief, input: job.input, run: job.runs } }, async (span) => {
+    // One WORKFLOW root per job run, labelled with its service so each service is its own workflow in neatlogs.
+    const root = {
+      name: `${WORKFLOW_NAMES[job.service]} · ${job.id}${job.runs > 1 ? ` · run ${job.runs}` : ''}`,
+      kind: 'WORKFLOW' as const,
+      input: { id: job.id, brief: job.brief, input: job.input, run: job.runs },
+      attributes: { 'neatlogs.workflow.name': WORKFLOW_NAMES[job.service] },
+    };
+    await trace(root, async (span) => {
       job.traces.push(span.spanContext().traceId);
       span.setAttribute('parallax.job_id', job.id);
       span.setAttribute('parallax.service', job.service);

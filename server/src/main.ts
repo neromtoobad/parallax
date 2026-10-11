@@ -4,9 +4,11 @@ import { init, flush, shutdown } from 'neatlogs';
 import { env } from './env.ts';
 
 // neatlogs first, so every client created after this is traced.
+// Process-wide default label; each job's root overrides it with its own service (runner.ts).
 await init({
   apiKey: env.neatlogsKey || undefined,
-  workflowName: 'parallax',
+  endpoint: process.env.NEATLOGS_ENDPOINT ?? 'https://ingest.neatlogs.com',
+  workflowName: 'research-job',
   disableExport: !env.neatlogsKey,
   tags: ['parallax', process.env.RAILWAY_ENVIRONMENT ? 'prod' : 'dev'],
   registerShutdownHandlers: false,
