@@ -10,16 +10,16 @@ import type { Job, Quote, ServiceId } from '../types.ts';
 const TARGET_MARGIN = 0.75;
 const BUDGET_HEADROOM = 2.5; // the hard cap, as a multiple of expected cost
 
-/** Starting estimates before there's any history, in USD per unit. */
-const PRIOR: Record<ServiceId, { perUnit: number; minPrice: number; unit: string }> = {
+/** Starting estimates before there's any history, in USD per unit; unitPrice is the public per-unit list price, where there is one. */
+const PRIOR: Record<ServiceId, { perUnit: number; minPrice: number; unitPrice?: number; unit: string }> = {
   'company-brief': { perUnit: 0.12, minPrice: 5, unit: 'brief' },
-  'lead-list': { perUnit: 0.05, minPrice: 2, unit: 'lead' },
+  'lead-list': { perUnit: 0.05, minPrice: 2, unitPrice: 1, unit: 'lead' },
   // ~3 person searches + up to 8 web searches (1 credit each) + a fast and a smart model call.
   'people-map': { perUnit: 0.15, minPrice: 3, unit: 'map' },
   // A 25-row semantic search, ~6 homepages (free direct fetch first) and 7 extractions + one smart write-up.
-  'competitor-teardown': { perUnit: 0.18, minPrice: 4, unit: 'teardown' },
+  'competitor-teardown': { perUnit: 0.18, minPrice: 5, unit: 'teardown' },
   // Per company: a share of the search and screen, one homepage read, one fast model call.
-  'market-map': { perUnit: 0.04, minPrice: 2, unit: 'company' },
+  'market-map': { perUnit: 0.04, minPrice: 2, unitPrice: 0.3, unit: 'company' },
   // Enrich (2 credits), a people search, 3 web searches, a homepage read, one classification call.
   'vendor-check': { perUnit: 0.08, minPrice: 2, unit: 'check' },
   // 2-4 small searches, 1 web search, free team-page fetches, one fast model call.
@@ -59,7 +59,7 @@ export function quote(job: Pick<Job, 'service' | 'input'>): Quote {
     }
   }
   const estCostUsd = perUnit * units;
-  const priceUsd = Math.max(prior.minPrice, Math.ceil((estCostUsd / (1 - TARGET_MARGIN)) * 2) / 2);
+  const priceUsd = Math.max(prior.minPrice, Math.ceil((prior.unitPrice ?? 0) * units * 2) / 2, Math.ceil((estCostUsd / (1 - TARGET_MARGIN)) * 2) / 2);
   return {
     priceUsd,
     estCostUsd: round(estCostUsd),
