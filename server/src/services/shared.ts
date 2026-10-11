@@ -1,6 +1,6 @@
 import { resolve4, resolve6 } from 'node:dns/promises';
-import { say } from '../context.ts';
-import { companySearch, COMPANY_FIELDS, FUNDING_FIELDS, webSearch, type WebResult } from '../crust.ts';
+import { BudgetExceeded, say } from '../context.ts';
+import { companyEnrich, companySearch, COMPANY_FIELDS, FUNDING_FIELDS, webSearch, type WebResult } from '../crust.ts';
 import { json } from '../llm.ts';
 
 /** Helpers shared by the services: company lookups, screening, people on the web, writer audits. */
@@ -147,7 +147,13 @@ export async function resolveCompany(name: string, domain: string | null, brief:
   const list = (hits.companies ?? []).map(companyRow);
   const exact = d && list.find((c) => c.domain === d);
   if (exact) return exact;
-  if (d) return { name, domain: d, description: '', headcount: null, country: null, founded: null, hq: null, fundingUsd: null, lastRound: null };
+  if (d) {
+    // The search ranks by words, so a well-known domain can miss; the enrich endpoint looks the domain up directly.
+    const e = await companyEnrich(d).catch((err) => (err instanceof BudgetExceeded ? Promise.reject(err) : null));
+    const row = e ? companyRow(e) : null;
+    if (row) say(`Found ${row.name} by its domain`);
+    return row ? { ...row, domain: row.domain || d } : { name, domain: d, description: '', headcount: null, country: null, founded: null, hq: null, fundingUsd: null, lastRound: null };
+  }
   const choice = list.length
     ? await json<{ index: number; reason: string }>({
         system: 'Pick the company the client means. If none fit, return index -1.',
@@ -224,6 +230,16 @@ export async function personOnWeb(name: string, company: string, prefetched?: We
 export function leftSignal(text: string, brand: string) {
   const b = escape(brand);
   return new RegExp(`\\b(former(ly)?|ex-|previously|left|departed|stepped down)[^.,;|·•\\n]{0,30}\\b${b}\\b|\\b${b}\\s+(alum|alumni|alumnus)\\b`, 'i').test(text);
+}
+
+/**
+ * Models join two bits of a page with "..." when quoting. Accept that only if every bit is on the page
+ * on its own; a short connective fragment can't carry a claim, so it must not be the only real bit.
+ */
+export function quotedOnPage(quote: string, page: string, onPage: (q: string, p: string) => boolean) {
+  const parts = quote.split(/\s*(?:\.\.\.|…)\s*/).map((x) => x.trim()).filter((x) => x.length >= 8);
+  if (parts.length <= 1) return onPage(quote.replace(/\s*(?:\.\.\.|…)\s*/g, ' '), page) || (parts.length === 1 && onPage(parts[0], page));
+  return parts.every((x) => onPage(x, page));
 }
 
 // ---- Writer audit -----------------------------------------------------------------------------

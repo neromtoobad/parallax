@@ -3,6 +3,7 @@
  *
  *   node --env-file=../.env scripts/try.ts <service> '<json input>'
  *   node --env-file=../.env scripts/try.ts person-check '{"name":"Karri Saarinen","company":"Linear","title":"CEO"}'
+ *   node --env-file=../.env scripts/try.ts --resume <jobId>      (raise a paused job's budget 2x and carry on)
  */
 import { init, flush, shutdown } from 'neatlogs';
 import type { ServiceId } from '../src/types.ts';
@@ -16,10 +17,15 @@ if (!service || !raw) {
 await init({ apiKey: process.env.NEATLOGS_API_KEY, endpoint: 'https://ingest.neatlogs.com', workflowName: 'research-job', tags: ['parallax', 'dev'], registerShutdownHandlers: false });
 const { createJob, runJob } = await import('../src/runner.ts');
 
-const job = createJob(service as ServiceId, JSON.parse(raw), { tag: 'dev' });
+const { getJob, saveJob } = await import('../src/store.ts');
+const job = service === '--resume' ? getJob(raw) : createJob(service as ServiceId, JSON.parse(raw), { tag: 'dev' });
 if (!job) {
-  console.error('unknown service or empty input');
+  console.error('unknown service, job or empty input');
   process.exit(1);
+}
+if (service === '--resume' && job.quote) {
+  job.quote.budgetUsd *= 2;
+  saveJob(job);
 }
 console.log(`${job.id}: quoted $${job.quote?.priceUsd} (est. cost $${job.quote?.estCostUsd}, budget $${job.quote?.budgetUsd})`);
 const t0 = Date.now();

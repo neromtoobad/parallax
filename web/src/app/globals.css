@@ -685,3 +685,59 @@ a.svc:hover {
     display: none;
   }
 }
+
+/* ---- job page ---- */
+.job {
+  padding: 44px 24px 20px;
+}
+.job-head {
+  display: flex;
+  gap: 20px;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.job-head h1.display {
+  font-size: clamp(34px, 4.6vw, 54px);
+  margin: 10px 0 6px;
+}
+.job-stage {
+  margin: 34px auto 26px;
+  max-width: 1000px;
+}
+.job-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+  margin-top: 24px;
+  align-items: start;
+}
+.job-main {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+.job-aside {
+  display: grid;
+  gap: 18px;
+  position: sticky;
+  top: 84px;
+}
+.job-details {
+  margin-top: 40px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+.job-details summary {
+  cursor: pointer;
+  color: var(--ink-2);
+  font-size: 14.5px;
+}
+@media (max-width: 1000px) {
+  .job-grid {
+    grid-template-columns: 1fr;
+  }
+  .job-aside {
+    position: static;
+  }
+}

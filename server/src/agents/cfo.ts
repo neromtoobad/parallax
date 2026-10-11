@@ -52,6 +52,11 @@ export function quote(job: Pick<Job, 'service' | 'input'>): Quote {
     const sorted = past.map((p) => p.perUnit).sort((a, b) => a - b);
     perUnit = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.75))];
     basis = `75th percentile cost of the last ${past.length} delivered ${job.service} job${past.length > 1 ? 's' : ''}: $${perUnit.toFixed(4)} per ${prior.unit}`;
+    // Two cheap early jobs (a dead domain stops a check early) shouldn't set the cap for the next one.
+    if (past.length < 3 && perUnit < prior.perUnit) {
+      perUnit = prior.perUnit;
+      basis += `; under 3 jobs of history, so the starting estimate of $${prior.perUnit.toFixed(2)} still sets the floor`;
+    }
   }
   const estCostUsd = perUnit * units;
   const priceUsd = Math.max(prior.minPrice, Math.ceil((estCostUsd / (1 - TARGET_MARGIN)) * 2) / 2);

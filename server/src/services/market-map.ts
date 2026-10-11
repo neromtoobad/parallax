@@ -4,7 +4,7 @@ import { json } from '../llm.ts';
 import { quoteOnPage } from '../agents/compare.ts';
 import { emit } from '../store.ts';
 import type { Check, Deliverable, Item, Job } from '../types.ts';
-import { companyRow, money, RICH_FIELDS, screen, toCsv, type CompanyRow } from './shared.ts';
+import { companyRow, money, quotedOnPage, RICH_FIELDS, screen, toCsv, type CompanyRow } from './shared.ts';
 
 /**
  * Market map: the companies in a space, with size, age and funding from the database, each one
@@ -137,7 +137,7 @@ async function checkCompany(space: string, c: CompanyRow & { why: string }): Pro
     user: `Space: ${space}\nCompany: ${c.name} (${c.domain})\nHomepage text:\n${site.text.slice(0, 5000)}\n\nReturn {"inSpace": boolean, "quote": string, "what": string}`,
     check: (v) => (typeof v?.inSpace !== 'boolean' ? 'inSpace must be boolean' : null),
   });
-  const quoted = r.inSpace && quoteOnPage(r.quote, site.text);
+  const quoted = r.inSpace && quotedOnPage(r.quote, site.text, quoteOnPage);
   checks.push({ name: 'in the space', ok: quoted, note: quoted ? `"${r.quote}"` : r.inSpace ? 'claimed, but the quote is not on the page' : r.what, source: site.url });
   if (!quoted) return item('dropped', r.inSpace ? 'quote not found on their site' : `not in the space: ${r.what}`);
   fields.what = r.what;

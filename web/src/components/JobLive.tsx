@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AGENTS, api, cents, fmtValue, host, usd, type Claim, type Fact, type JobEvent, type JobView } from '@/lib/api';
 import { AGENT_IDS, type AgentState, type Pose } from '@/lib/cast';
 import { Studio } from './Studio';
+import { serviceById } from '@/lib/catalog';
 
 const FACT_LABELS: [string, string][] = [
   ['what', 'What they do'],
@@ -39,22 +40,22 @@ export function JobLive({ id }: { id: string }) {
   const running = job.status === 'running';
 
   return (
-    <main className="wrap" style={{ padding: '30px 24px' }}>
+    <main className="wrap job" style={{ maxWidth: 1140 }}>
       <Header job={job} />
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 360px', gap: 18, marginTop: 18, alignItems: 'start' }} className="job-grid">
-        <div style={{ display: 'grid', gap: 18, minWidth: 0 }}>
-          <div className="card" style={{ padding: '10px 10px 4px', overflow: 'visible' }}>
-            <Studio states={states} tags />
-          </div>
-          <Headline job={job} />
+      <div className="job-stage">
+        <Studio states={states} />
+      </div>
+      <Headline job={job} />
+      <div className="job-grid">
+        <div className="job-main">
           {job.service === 'company-brief' ? <Brief job={job} /> : job.service === 'lead-list' ? <Leads job={job} /> : <Generic job={job} />}
-          <Steps job={job} />
         </div>
-        <div style={{ display: 'grid', gap: 18, position: 'sticky', top: 80 }}>
+        <aside className="job-aside">
           <Money job={job} />
           <Timeline events={events} running={running} />
-        </div>
+        </aside>
       </div>
+      <Details job={job} />
     </main>
   );
 }
@@ -216,27 +217,28 @@ function StatusPill({ status }: { status: JobView['status'] }) {
 }
 
 function Header({ job }: { job: JobView }) {
-  const title = job.service === 'company-brief' ? `Company brief${job.live.company ? `: ${job.live.company.name}` : ''}` : `Lead list${job.live.intake?.count ? `: ${job.live.intake.count} leads` : ''}`;
+  const name = serviceById(job.service)?.name ?? job.service;
+  const subject = job.live.company?.name ?? job.input.company ?? job.input.name ?? job.input.space ?? job.input.icp;
+  const purpose = job.input.purpose ?? job.input.goal ?? job.input.context ?? job.input.focus ?? job.input.titles;
   return (
-    <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap' }}>
-      <div>
+    <div className="job-head">
+      <div style={{ minWidth: 0 }}>
         <div className="eyebrow">
-          {job.id} {job.runs > 1 && `· run ${job.runs}`} {job.tag && `· ${job.tag}`}
+          {name}
+          {job.runs > 1 && ` · resumed, run ${job.runs}`}
         </div>
-        <h2 style={{ marginTop: 8 }}>{title}</h2>
-        <div className="muted" style={{ whiteSpace: 'pre-line', fontSize: 14 }}>
-          {job.brief}
-        </div>
+        <h1 className="display">{subject ? String(subject) : name}</h1>
+        {purpose && <p className="muted" style={{ margin: 0, fontSize: 16 }}>{String(purpose)}</p>}
       </div>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <StatusPill status={job.status} />
         {job.status === 'paused' && (
-          <button className="btn" style={{ height: 34 }} onClick={() => api(`/jobs/${job.id}/approve`, { method: 'POST' })}>
+          <button className="btn sm" onClick={() => api(`/jobs/${job.id}/approve`, { method: 'POST' })}>
             Approve 50% more budget
           </button>
         )}
         {job.status === 'failed' && (
-          <button className="btn" style={{ height: 34 }} onClick={() => api(`/jobs/${job.id}/resume`, { method: 'POST' })}>
+          <button className="btn sm" onClick={() => api(`/jobs/${job.id}/resume`, { method: 'POST' })}>
             Resume from last step
           </button>
         )}
@@ -252,73 +254,47 @@ function Money({ job }: { job: JobView }) {
   const books = job.result?.books;
   return (
     <div className="card pad">
-      <div className="eyebrow">The money</div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 10 }}>
-        <span style={{ fontSize: 30, fontWeight: 650, letterSpacing: '-0.02em' }}>{usd(job.result?.priceUsd ?? q?.priceUsd)}</span>
-        <span className="muted" style={{ fontSize: 13 }}>
-          price
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <span className="eyebrow">price</span>
+        {books && <span className="mono" style={{ color: 'var(--agree)', fontWeight: 600 }}>{books.marginPct}% margin</span>}
+      </div>
+      <div style={{ fontFamily: 'var(--display)', fontSize: 40, fontWeight: 700, letterSpacing: '-0.03em', margin: '4px 0 14px' }}>{usd(job.result?.priceUsd ?? q?.priceUsd)}</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13.5 }}>
+        <span className="muted">Spent</span>
+        <span className="mono">
+          {usd(spent, 3)} <span className="muted">of {usd(q?.budgetUsd, 2)} cap</span>
         </span>
       </div>
-      <div style={{ marginTop: 14, fontSize: 13 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <span className="muted">Spent</span>
-          <span className="mono">
-            {usd(spent, 4)} / {usd(q?.budgetUsd, 4)} cap
-          </span>
-        </div>
-        <div style={{ height: 8, background: '#eeeee8', borderRadius: 99, marginTop: 6, overflow: 'hidden' }}>
-          <div style={{ width: `${pctBudget}%`, height: '100%', background: pctBudget > 85 ? 'var(--conflict)' : 'var(--agree)', transition: 'width .4s' }} />
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10 }}>
-          <span className="muted">Models · {job.spend.llmCalls} calls</span>
-          <span className="mono">{usd(job.spend.llmUsd, 4)}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <span className="muted">Data · {job.spend.toolCalls} calls</span>
-          <span className="mono">
-            {job.spend.credits.toFixed(2)} cr · {usd(job.spend.creditsUsd, 4)}
-          </span>
-        </div>
-        {books && (
-          <div style={{ borderTop: '1px solid var(--line)', marginTop: 12, paddingTop: 12, display: 'flex', justifyContent: 'space-between' }}>
-            <span>Margin</span>
-            <span className="mono" style={{ color: 'var(--agree)', fontWeight: 600 }}>
-              {books.marginPct}% · {books.vsEstimate}% of estimate
-            </span>
-          </div>
-        )}
+      <div style={{ height: 6, background: 'var(--bg-2)', borderRadius: 99, marginTop: 8, overflow: 'hidden' }}>
+        <div style={{ width: `${pctBudget}%`, height: '100%', background: pctBudget > 85 ? 'var(--conflict)' : 'var(--cfo)', transition: 'width .4s' }} />
       </div>
-      {job.traces.length > 0 && (
-        <div style={{ marginTop: 14, fontSize: 12 }}>
-          <div className="muted">neatlogs trace{job.traces.length > 1 ? 's' : ''}</div>
-          {job.traces.map((t) => (
-            <div key={t} className="mono" style={{ fontSize: 11, wordBreak: 'break-all' }}>
-              {t}
-            </div>
-          ))}
-        </div>
-      )}
+      <div className="muted" style={{ fontSize: 12.5, marginTop: 10 }}>
+        {job.spend.llmCalls} model calls ({usd(job.spend.llmUsd, 3)}) · {job.spend.toolCalls} data calls ({job.spend.credits.toFixed(1)} credits)
+      </div>
     </div>
   );
 }
 
 function Timeline({ events, running }: { events: JobEvent[]; running: boolean }) {
-  const box = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    box.current?.scrollTo({ top: box.current.scrollHeight, behavior: 'smooth' });
-  }, [events.length]);
+  const [all, setAll] = useState(false);
+  const shown = (all ? events : events.slice(-7)).filter((e) => e.kind !== 'tool' || all);
   const mark: Record<string, string> = { retry: '↻', recover: '✚', conflict: '⚡', resolve: '⚖', check: '✓', money: '$', error: '✕' };
   return (
-    <div className="card" style={{ padding: '16px 0 6px' }}>
-      <div className="eyebrow" style={{ padding: '0 18px' }}>
-        What the team is doing {running && <span className="live" style={{ color: 'var(--agree)' }}>● live</span>}
+    <div className="card" style={{ padding: '18px 20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span className="eyebrow">activity {running && <span className="pulse" style={{ color: 'var(--agree)' }}>● live</span>}</span>
+        {events.length > 7 && (
+          <button onClick={() => setAll(!all)} style={{ border: 0, background: 'none', color: 'var(--ink-2)', fontSize: 12.5, cursor: 'pointer', padding: 0 }}>
+            {all ? 'Show less' : `All ${events.length}`}
+          </button>
+        )}
       </div>
-      <div ref={box} style={{ maxHeight: 460, overflow: 'auto', padding: '8px 18px', marginTop: 4 }}>
-        {events.map((e) => (
-          <div key={e.seq} className="fade-in" style={{ display: 'grid', gridTemplateColumns: '68px 1fr', gap: 8, padding: '6px 0', fontSize: 13, borderBottom: '1px dashed var(--line)' }}>
-            <span style={{ color: AGENTS[e.agent]?.color, fontWeight: 600 }}>{AGENTS[e.agent]?.name}</span>
+      <div style={{ marginTop: 10, display: 'grid', gap: 10, maxHeight: all ? 520 : undefined, overflow: all ? 'auto' : undefined }}>
+        {shown.map((e) => (
+          <div key={e.seq} className="fade-in" style={{ fontSize: 13.5, lineHeight: 1.45 }}>
+            <span style={{ color: AGENTS[e.agent]?.color, fontWeight: 650 }}>{AGENTS[e.agent]?.name}</span>{' '}
             <span style={{ color: e.kind === 'error' ? 'var(--conflict)' : e.kind === 'recover' ? 'var(--agree)' : 'var(--ink-2)' }}>
-              {mark[e.kind] && <b style={{ marginRight: 5 }}>{mark[e.kind]}</b>}
+              {mark[e.kind] && <b style={{ marginRight: 3 }}>{mark[e.kind]}</b>}
               {e.text}
             </span>
           </div>
@@ -329,34 +305,40 @@ function Timeline({ events, running }: { events: JobEvent[]; running: boolean })
   );
 }
 
-function Steps({ job }: { job: JobView }) {
+/** Folded away: the saved steps and the trace IDs, for anyone who wants to check our work. */
+function Details({ job }: { job: JobView }) {
   if (!job.steps.length) return null;
   return (
-    <details className="card pad">
-      <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Checkpoints ({job.steps.filter((s) => s.status === 'done').length} saved steps)</summary>
-      <p className="muted" style={{ fontSize: 13 }}>
+    <details className="job-details">
+      <summary>
+        Under the hood · {job.steps.filter((s) => s.status === 'done').length} saved steps · {job.traces.length} neatlogs trace{job.traces.length === 1 ? '' : 's'}
+      </summary>
+      <p className="muted" style={{ fontSize: 13.5 }}>
         Every step is saved when it finishes. If the job stops, a resume skips straight past these and pays nothing twice.
       </p>
-      <table className="t">
-        <tbody>
-          {job.steps.map((s) => (
-            <tr key={s.key}>
-              <td className="mono">{s.key}</td>
-              <td style={{ color: AGENTS[s.agent]?.color }}>{AGENTS[s.agent]?.name}</td>
-              <td>{s.status === 'done' ? <span className="pill agree">done</span> : <span className="pill conflict">{s.status}</span>}</td>
-              <td className="mono muted">{s.attempts > 1 ? `${s.attempts} tries` : ''}</td>
-              <td className="mono" style={{ textAlign: 'right' }}>
-                {((s.endedAt - s.startedAt) / 1000).toFixed(1)}s · {cents(s.costUsd)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div style={{ overflowX: 'auto' }}>
+        <table className="t" style={{ minWidth: 560 }}>
+          <tbody>
+            {job.steps.map((s) => (
+              <tr key={s.key}>
+                <td className="mono">{s.key}</td>
+                <td style={{ color: AGENTS[s.agent]?.color }}>{AGENTS[s.agent]?.name}</td>
+                <td>{s.status === 'done' ? <span className="pill agree">done</span> : <span className="pill conflict">{s.status}</span>}</td>
+                <td className="mono muted">{s.attempts > 1 ? `${s.attempts} tries` : ''}</td>
+                <td className="mono" style={{ textAlign: 'right' }}>
+                  {((s.endedAt - s.startedAt) / 1000).toFixed(1)}s · {cents(s.costUsd)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mono muted" style={{ fontSize: 12, marginTop: 12 }}>
+        job {job.id} · traces {job.traces.join(', ')}
+      </div>
     </details>
   );
 }
-
-// ---- company brief -------------------------------------------------------------------------
 
 function Brief({ job }: { job: JobView }) {
   const facts = job.result?.facts ?? job.live.facts;
@@ -446,7 +428,7 @@ function Verdict({ f }: { f: Fact }) {
         {f.agreement === 'neither' && <span className="pill">not found</span>}
         {f.verified === false && f.agreement !== 'neither' && <span className="pill conflict">rejected</span>}
       </div>
-      {f.verified && f.key !== 'what' && <div className="mono">{clip(value, 60)}</div>}
+      {f.verified && f.chosen === 'tiebreak' && <div className="mono">{clip(value, 60)}</div>}
       {(f.agreement === 'conflict' || (f.check && /failed|not found|does not/.test(f.check))) && (
         <div className="muted" style={{ fontSize: 12 }}>
           {f.reason || f.check}

@@ -2,10 +2,10 @@ import { BudgetExceeded, say, step } from '../context.ts';
 import { companySearch, directFetch, readPages, usablePage } from '../crust.ts';
 import { env } from '../env.ts';
 import { json } from '../llm.ts';
-import { quoteOnPage, quoteSupports } from '../agents/compare.ts';
+import { quoteOnPage } from '../agents/compare.ts';
 import { emit } from '../store.ts';
 import type { Check, Deliverable, Item, Job } from '../types.ts';
-import { canon, companyRow, looksLikeDomain, money, resolveCompany, RICH_FIELDS, screen, toCsv, writeAudited, type CompanyRow } from './shared.ts';
+import { canon, companyRow, looksLikeDomain, money, quotedOnPage, resolveCompany, RICH_FIELDS, screen, toCsv, writeAudited, type CompanyRow } from './shared.ts';
 
 /**
  * Competitor teardown: who the client competes with and how each one sells itself. Records finds
@@ -67,7 +67,9 @@ export async function runCompetitorTeardown(job: Job): Promise<Deliverable> {
   const rivals = await step(job, 'records', 'rivals', async () => {
     const about = company.description || client.positioning?.value || name;
     say(`Searching the company database for businesses like ${name}${intake.local && company.country ? ` in ${company.country}` : ''}`, 'tool');
-    const r = await companySearch({ query: about.slice(0, 400), mode: 'semantic', country: intake.local && company.country ? company.country : undefined, limit: 25, fields: RICH_FIELDS });
+    // Buyers shortlist companies of some weight; one-person startups crowd a semantic search otherwise.
+    const minStaff = Math.max(15, Math.round((company.headcount ?? 150) * 0.1));
+    const r = await companySearch({ query: about.slice(0, 400), mode: 'semantic', country: intake.local && company.country ? company.country : undefined, minStaff, limit: 25, fields: RICH_FIELDS });
     const brand = name.toLowerCase().split(/\s+/)[0];
     const list = (r.companies ?? []).map(companyRow).filter((c) => c.domain && c.domain !== company.domain && !c.name.toLowerCase().startsWith(brand));
     say(`Records proposed ${list.length} candidates`);
@@ -159,7 +161,7 @@ async function readOffer(name: string, domain: string, focus: string): Promise<O
 
   const out = await json<{ positioning: Raw | null; target: Raw | null; pricing: Raw | null }>({
     system:
-      "You read a company's own web pages and pull out how it sells itself. For each item give a short plain value and a quote copied character-for-character from the page (max 200 chars) that states it, plus the page id. positioning: what the product is, in one line. target: who it is for (type of customer or team). pricing: the plan prices or pricing model if the pages state them, else null. Use null for anything the pages don't state. Never use outside knowledge.",
+      "You read a company's own web pages and pull out how it sells itself. For each item give a short plain value and a quote copied character-for-character from the page (max 200 chars) that states it, plus the page id. Quote one continuous run of words from the page: never join pieces with \"...\". positioning: what the product is, in one line. target: who it is for (type of customer or team). pricing: the plan prices or pricing model if the pages state them, else null. Use null for anything the pages don't state. Never use outside knowledge.",
     user: `Company: ${name} (${domain})\nClient focus: ${focus}\n\n${Object.entries(pages).map(([id, pg]) => `[${id}] ${pg.url}\n${pg.text.slice(0, id === 'H' ? 6000 : 5000)}`).join('\n\n')}\n\nReturn {"positioning": {"value", "quote", "page"}|null, "target": {"value", "quote", "page"}|null, "pricing": {"value", "quote", "page"}|null}`,
     check: (v) => (!v || typeof v !== 'object' || !('positioning' in v) ? 'positioning key required' : null),
   });
@@ -168,11 +170,20 @@ async function readOffer(name: string, domain: string, focus: string): Promise<O
   const verify = (r: Raw | null, isPrice = false): Claimed | null => {
     if (!r?.value || !r.quote) return null;
     const page = pages[r.page] ?? pages.H;
-    const onPage = quoteOnPage(r.quote, page.text);
-    const says = !isPrice || !/\d/.test(r.value) || quoteSupports('money', r.value, r.quote);
+    const onPage = quotedOnPage(r.quote, page.text, quoteOnPage);
+    const says = !isPrice || priceSays(String(r.value), r.quote);
     return { value: String(r.value).slice(0, 200), quote: r.quote.slice(0, 240), source: page.url, verified: onPage && says, note: !onPage ? 'quote not found on the page' : !says ? "quote doesn't state the price" : 'quote found on the page' };
   };
   return { site: true, url: site.url, pricingUrl: pricingPage?.url ?? null, positioning: verify(out.positioning), target: verify(out.target), pricing: verify(out.pricing, true) };
+}
+
+/** A stated price must be in the quote: at least one non-zero number of the value appears in it. */
+function priceSays(value: string, quote: string) {
+  const nums = (t: string) => [...t.replace(/,/g, '').matchAll(/\d+(?:\.\d+)?/g)].map((m) => parseFloat(m[0])).filter((n) => n > 0);
+  const want = nums(value);
+  if (!want.length) return true; // "Free" or "contact sales": nothing numeric to check beyond the quote itself
+  const have = new Set(nums(quote));
+  return want.some((n) => have.has(n));
 }
 
 interface Raw {
