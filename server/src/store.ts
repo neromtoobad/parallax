@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { hostname } from 'node:os';
 import { env } from './env.ts';
@@ -10,25 +10,28 @@ mkdirSync(jobsDir, { recursive: true });
 
 const bus = new EventEmitter();
 bus.setMaxListeners(200);
-const cache = new Map<string, Job>();
+// Cached with the file's mtime: another process (an eval run, a second server) may write the same job.
+const cache = new Map<string, { job: Job; mtime: number }>();
 
 export function saveJob(job: Job) {
   job.updatedAt = Date.now();
   if (job.status === 'running') job.lease = { pid: process.pid, host: hostname(), at: Date.now() };
-  cache.set(job.id, job);
   const file = join(jobsDir, `${job.id}.json`);
   // Write then rename, so a crash mid-write never leaves a half-written checkpoint.
   writeFileSync(file + '.tmp', JSON.stringify(job, null, 2));
   renameSync(file + '.tmp', file);
+  cache.set(job.id, { job, mtime: statSync(file).mtimeMs });
   bus.emit('job', job);
 }
 
 export function getJob(id: string): Job | undefined {
-  if (cache.has(id)) return cache.get(id);
   const file = join(jobsDir, `${id}.json`);
-  if (!existsSync(file)) return undefined;
+  if (!existsSync(file)) return cache.get(id)?.job;
+  const mtime = statSync(file).mtimeMs;
+  const hit = cache.get(id);
+  if (hit && hit.mtime === mtime) return hit.job;
   const job = JSON.parse(readFileSync(file, 'utf8')) as Job;
-  cache.set(id, job);
+  cache.set(id, { job, mtime });
   return job;
 }
 

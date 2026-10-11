@@ -15,7 +15,10 @@ const load = (l: string) =>
     const c = BRIEFS.find((b) => b.id === r.case);
     const file = join(dir, '../../data/jobs', `${r.jobId}.json`);
     if (r.service !== 'company-brief' || !c || !existsSync(file)) return r;
-    const g = goldScore(c, JSON.parse(readFileSync(file, 'utf8')).result?.facts ?? []);
+    const job = JSON.parse(readFileSync(file, 'utf8'));
+    // Only trust the file if one process ran the job; otherwise keep the score the eval took from memory.
+    if (job.runs !== 1 || !job.result) return r;
+    const g = goldScore(c, job.result.facts ?? []);
     return { ...r, goldRight: g.filter((x) => x === 'right').length, goldWrong: g.filter((x) => x === 'wrong').length };
   });
 const A = load(a), B = load(b);
