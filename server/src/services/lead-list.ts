@@ -141,10 +141,11 @@ async function checkLead(intake: Intake, c: { name: string; domain: string; desc
   // Field angle 1: does the company's own site say it fits?
   say(`Reading ${c.domain}`, 'tool');
   let [site] = await webFetch([`https://${c.domain}`]);
-  if (!site?.ok) {
+  if (!usable(site)) {
     say(`${c.domain} didn't load; retrying as a browser`, 'recover');
     [site] = await webFetch([`https://www.${c.domain}`], true);
   }
+  if (!usable(site)) site = { ...site, ok: false };
   checks.push({ name: 'site is live', ok: !!site?.ok, note: site?.ok ? site.title.slice(0, 80) : 'could not load the homepage' });
   if (!site?.ok) return drop('website did not load');
 
@@ -198,6 +199,13 @@ const FILLER = new Set(['of', 'and', 'the', '&', 'for', 'at']);
 const toks = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter((w) => w && !FILLER.has(w));
 
 /** Position of the first wanted title whose every word is a whole word in this title ("CTO" no longer matches "Director"). */
+/** A bot-check or empty shell isn't a homepage; it can't show fit. */
+function usable(p?: { ok: boolean; text: string }) {
+  if (!p?.ok) return false;
+  if (p.text.length < 400) return false;
+  return !/checking your browser|just a moment|enable javascript and cookies|verify you are human|attention required|access denied/i.test(p.text.slice(0, 1500));
+}
+
 function rank(title: string, order: string[]) {
   const t = new Set(toks(title));
   const i = order.findIndex((o) => {
