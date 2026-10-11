@@ -42,6 +42,43 @@
 - Web app (`web/`, Next.js): hire form with a CFO quote, a live job page (both angles side by side, verdicts, a streamed timeline, money against the budget cap, checkpoints, trace IDs), a jobs list, and a books page with eval comparisons.
   - Fixed live updates: Next's proxy gzip-buffered the event stream, so compression is now off for it.
 
+- Lead-list fixes found by watching the v1 run:
+  - **Bad candidates.** Semantic company search alone returned consultancies and courses. The search now uses hard headcount and country filters, and the database profiles are screened before any credits go on websites.
+  - **Wrong contacts.** "CTO" substring-matched "Dire*cto*r", so a Senior Sales Director came back as a CTO lead. Titles now match on whole words, and the contact must hold the asked-for role or be a founder or C-level.
+  - **Pages that wouldn't load.** Bot-check pages count as not loaded and get a browser-mode retry.
+- Verifier fix: values naming several people. PostHog has two co-CEOs; the web said both and the database only one, and the old check wrongly rejected the web claim. Eval gold now accepts either co-CEO (posthog.com/about lists both).
+- Two concurrency bugs, found when the API's crash recovery re-ran jobs the eval process was still working on:
+  - **Leases.** A job carries the pid, host and time of its owner, and recovery only takes over a dead lease.
+  - **Cache.** The job cache is keyed by file mtime, so a stale in-memory copy never looks abandoned.
+
+### Eval v1 → v2 (same 9 fixed jobs; `server/evals/v1-vs-v2.md`)
+
+| metric | v1 | v2 |
+| --- | --- | --- |
+| facts seen from both angles | 45% | **82%** |
+| facts verified | 100% | 100% |
+| gold facts right / wrong | 14/14, 0 wrong | 14/14, 0 wrong |
+| brief points with guesswork | 39% | **0%** |
+| avg cost per brief | $0.167 | $0.189 (more searching, by design) |
+| leads delivered / wanted | 9/10 (one list hit its budget) | **10/10** |
+| candidates checked per lead | 6.9 | **2.0** |
+| cost per delivered lead | $0.123 | **$0.072** |
+| avg seconds per lead list | 231 | **113** |
+
+Trace IDs for every row are in `server/evals/v1-vs-v2.md`.
+
+### Recovery on production (unplanned)
+
+- Live job `job_mv3ikdo86bu0` on Railway (company brief, Paystack) was running when two git pushes redeployed the container mid-job.
+- The new container logged "The server restarted mid-job; resuming from the last saved step" and resumed as run 2 with **6 finished steps kept** (nothing paid twice).
+- It rode out a string of Crustdata 429s with backoff, then delivered: 7/7 facts verified, cost $0.204, price $2.
+- neatlogs traces: `1d2fd7e5055c87cd1015ba1082e2572f` (interrupted), `c45a78388a7d892fec0af7443a2fecb8` (resumed).
+
+### Business plan
+
+- `server/scripts/unit-economics.ts` → `docs/unit-economics.md`: measured cost per brief and per lead from delivered jobs. Data is about 90% of the cost; models 6–13%.
+- `docs/business-plan-brief.md`: pricing, assumptions, scenarios and the prompt for cfo.ai (Ari). cfo.ai's MCP server is in `.mcp.json`.
+
 ## Demo
 
 Pending.
