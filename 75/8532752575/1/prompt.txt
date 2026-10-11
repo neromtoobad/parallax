@@ -1,0 +1,45 @@
+You are adding five new services to Parallax, an AI research agency in /Users/mac/Documents/Hacks/parallax (TypeScript, Node 24 runs .ts directly, no build). It is a hackathon entry (neatHack, judged on agents that finish substantial tasks reliably: planning, tool use, state, recovery, verification). Every answer is checked from two independent angles: **Records** (Crustdata structured databases) and **Field** (open web: Crustdata web search + page reads), an **Arbiter** settles conflicts, a **Verifier** checks claims in plain code, and a **CFO** prices jobs and enforces a hard budget.
+
+Read first, fully: CLAUDE.md, server/src/context.ts (step(), say(), charge/assertBudget, BudgetExceeded, Permanent), server/src/crust.ts (companySearch, companyEnrich, peopleAt, webSearch, webFetch, readPages, directFetch, usablePage, countryNames), server/src/llm.ts (json() with check + repair), server/src/agents/compare.ts (same(), quoteOnPage(), quoteSupports(), people()), server/src/agents/cfo.ts (PRIOR, unitsOf, quote), server/src/catalog.ts, server/src/runner.ts (SERVICES map), server/src/services/company-brief.ts and lead-list.ts (the two existing services: copy their patterns: checkpointed step() per unit of work so resume works, say() narration, quotes verified against page text, plain-code checks, BudgetExceeded handling, partial delivery).
+
+## Build these services (ids exactly as given)
+
+Add a `dept` field to every catalog entry: 'sales' | 'market' | 'trust' (company-brief and lead-list are 'sales').
+
+1. **people-map** (sales) "Who to talk to": input {company, goal} (e.g. "selling HR software"). Lead works out which functions matter for the goal; Records finds current people at the company by those functions/titles (peopleAt with several title groups, rank seniority); Field confirms each person on the open web (search "Name Company", snippet must mention surname + company, flag "former/ex-/left"). Deliver 3-8 people with role, why they matter for the goal, confirmation checks. Unit for pricing: 1 map.
+2. **competitor-teardown** (market): input {company, focus} . Resolve the company (like company-brief resolve). Records finds 4-6 competitors (companySearch semantic on the company's description, same country optional, exclude itself); Lead screens them with one model call. For each competitor (step per competitor): Records gives headcount/founded/funding from the search fields/enrich; Field reads its homepage (+ /pricing if it exists, via readPages) and extracts positioning one-liner, target customer, pricing (if stated) each with an exact quote verified by quoteOnPage. Then a Writer step produces "how the client differs / where it's exposed" points citing only verified items (reuse the audit idea from company-brief: cites must exist, no hedging words). Unit: 1 teardown.
+3. **market-map** (market): input {space, country?, count}. Like lead-list without people: companies in the space with name, domain, headcount, founded, funding, HQ (Records), each confirmed by Field reading its homepage with a quoted line showing what it does (quoteOnPage). Reuse lead-list's search filters, screening and DNS liveness ideas (factor shared helpers into a module if useful, e.g. server/src/services/shared.ts, without breaking lead-list). Unit: per company delivered, like lead-list (partial delivery on budget).
+4. **vendor-check** (trust) "Check before you pay": input {company (name or domain), context} e.g. "supplier asking for a 50% deposit". Produce a verdict green / amber / red with evidence. Signals, each a check {name, ok, severity, note, source}: domain resolves and site loads; Records has a company record and it matches the name/domain; founded year and headcount plausible; a named leader exists in the people database AND on the web; web search for complaints/scam/fraud/lawsuit mentions (Field reads snippets, quotes them; an LLM classifies each snippet as about THIS company or not, quote must be in the snippet); news check. The verdict is computed in plain code from the checks (e.g. any high-severity fail → red; 2+ medium → amber), never by an LLM alone. Unit: 1 check.
+5. **person-check** (trust) "Verify a person": input {name, company, title?}. Records: person search by name + current employer domain/name → current title, start date, profile URL; Field: web search for the person + company → snippets confirming/contradicting (former/left), plus the company's own team/about page if found. Verdict: confirmed / mismatch / not found, computed in code. Unit: 1 check.
+
+## Output shape (so the web UI can render every service generically)
+Every new service returns an object with:
+```
+{
+  headline: string,                       // one-sentence answer, plain words
+  verdict?: 'green' | 'amber' | 'red' | 'confirmed' | 'mismatch' | 'not-found',
+  facts?: Resolved[],                     // two-angle fact rows (same type as company-brief) when relevant
+  items?: { title: string; subtitle?: string; link?: string; status: 'verified' | 'dropped'; checks: { name: string; ok: boolean; note: string; severity?: 'low'|'medium'|'high' }[]; fields?: Record<string, string>; dropReason?: string }[],
+  points?: { text: string; cites: string[] }[],
+  stats: Record<string, number>,          // include counts like verified/checked/conflicts
+  csv?: string,
+  partial?: boolean, priceUsd?: number
+}
+```
+Also add `headline` (and keep everything else) to the existing company-brief and lead-list results, without changing their other fields.
+
+## Wire-up
+- server/src/catalog.ts: entries with id, name, dept, blurb, fields (name, label, placeholder, type?) for each new service.
+- server/src/runner.ts: add to SERVICES and WORKFLOW_NAMES (workflow name = service id).
+- server/src/agents/cfo.ts: PRIOR entry per new service (estimate from the call pattern: Crustdata web search 1 credit/query, page fetch via Crustdata 1 credit/page but readPages tries a free direct fetch first, company enrich 2 credits, company/person search ~0.03-0.25/result; credits are valued at $0.01; models are cheap) and unitsOf for market-map (per company like lead-list).
+- server/src/types.ts: add the new ServiceIds.
+- server/evals/cases.ts: add one eval case per new service (realistic inputs, e.g. people-map for Paystack selling HR software; competitor-teardown for Linear; market-map "AI agent observability tools", United States, 5; vendor-check for a real company like "Paystack" plus a likely-fake domain; person-check for "Karri Saarinen, Linear, CEO"), and extend scripts/eval.ts so they run and record generic rows (status, cost, secs, stats, verdict). Keep existing cases untouched.
+
+## Rules
+- Typecheck must pass: `cd server && npx tsc --noEmit -p .`.
+- Test each new service with ONE real job at the end, via a small script (e.g. server/scripts/try.ts <service> '<json input>') that calls createJob + runJob in-process with tag 'dev' and prints the result headline, stats and cost. BEFORE running any live test, wait until /Users/mac/Documents/Hacks/parallax/data/eval-v4.log contains "wrote evals" (an eval is running and Crustdata's web search limit is 10/min; don't compete). Poll with sleep loops in bash. Keep total spend small (each test should cost under ~$0.40). Run the API env with `node --env-file=../.env`. Never print keys.
+- Do NOT touch web/ (someone else is rebuilding the UI right now) and do NOT git commit or push (the lead will commit). Do not restart or kill any running processes (an API server on :8787 and an eval process are running).
+- Match the existing code style: concise, comments only where they explain why, plain-English say() lines that a client could read in a live timeline.
+- Fix bugs you find in the live tests (Crustdata field names: check live responses; the docs index is at https://docs.crustdata.com/llms.txt).
+
+When done, report: files changed, each service's live test result (headline, verdict/stats, cost, trace id from job.traces), anything that failed or that you were unsure about.
