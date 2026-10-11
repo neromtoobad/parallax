@@ -50,7 +50,8 @@ async function call<T>(path: string, body: unknown, estCredits = 1): Promise<T> 
       const status = err instanceof CrustError ? err.status : 0; // 0 = network/timeout
       const retryable = status === 0 || status === 429 || status >= 500;
       if (!retryable) throw new Permanent((err as Error).message);
-      if (attempt >= 4) throw err;
+      // Rate limits clear on their own when several jobs share the key, so wait them out longer (~90s in all).
+      if (attempt >= (status === 429 ? 6 : 4)) throw err;
       const wait = status === 429 ? 6000 * attempt : 700 * 2 ** attempt;
       say(`Crustdata ${path} ${status || 'network error'}; retry ${attempt} in ${(wait / 1000).toFixed(1)}s`, 'retry');
       await new Promise((r) => setTimeout(r, wait));

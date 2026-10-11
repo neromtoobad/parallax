@@ -141,7 +141,8 @@ export function approveMore(id: string, factor = 1.5) {
 /** On boot: anything that was mid-run when the process died gets picked up again. */
 export function resumeInterrupted() {
   for (const j of listJobs()) {
-    if (j.status === 'running' && !leaseHeld(j)) {
+    // Jobs this process is running hold no stale lease, even though the pid matches (a new container often reuses pid 1).
+    if (j.status === 'running' && !active.has(j.id) && !leaseHeld(j)) {
       emit(j, { agent: 'system', kind: 'recover', text: 'The server restarted mid-job; resuming from the last saved step' });
       void runJob(j.id);
     }

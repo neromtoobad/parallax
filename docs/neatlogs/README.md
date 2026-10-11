@@ -38,4 +38,7 @@ neatlogs flagged two of this morning's production jobs as **Execution Failed**, 
 - **People map on Linear** (trace `cc419daffbf780171c90c856fbe1cc39`). One `crustdata.web_search` errored after 39.4 s while checking one person on the web. The job carried on: that person was kept on the database's word and reported as not web-confirmed ("4 of 5 confirmed on the open web").
 - **Vendor check on stripe.com** (`job_mv3o65hg0naz`). Also flagged; it delivered green, with 12 of 13 checks passed.
 
-Next fix: retry a web search once on timeout before counting a person as unconfirmed.
+**What the trace led to.** The job's activity log showed the real cause: Crustdata rate limits (three 429s in a row while 7 test jobs shared the key), not a timeout. Two fixes, both shipped:
+
+- **Longer retries on rate limits.** On 429s, Crustdata calls now retry up to 6 times (about 90 s) instead of 4.
+- **A false "server restarted" message.** The same log showed "The server restarted mid-job" with no restart. The once-a-minute recovery check treated a job this process was still running as abandoned, because a new container usually reuses pid 1. Nothing ran twice, but the message was wrong. Recovery now skips jobs the process is actively running. Checked locally with a 124 s job: no false recovery events.
