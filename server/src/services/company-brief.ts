@@ -1,5 +1,5 @@
 import { say, step } from '../context.ts';
-import { companyEnrich, companySearch, peopleAt, webFetch, webSearch, type WebResult } from '../crust.ts';
+import { companyEnrich, companySearch, peopleAt, readPages, webSearch, type WebResult } from '../crust.ts';
 import { env } from '../env.ts';
 import { json } from '../llm.ts';
 import { quoteOnPage, quoteSupports, same, type Kind } from '../agents/compare.ts';
@@ -111,8 +111,8 @@ export async function runCompanyBrief(job: Job) {
       const fresh = urls.map(canon).filter((u) => !pages.some((p) => canon(p.url) === u));
       if (!fresh.length) return;
       say(`Reading ${fresh.length} page${fresh.length > 1 ? 's' : ''}`, 'tool');
-      const got = await webFetch(fresh).catch((e) => (say(`page fetch failed (${e.message}); working from search snippets`, 'recover'), []));
-      for (const p of got) if (p.ok && p.text.length > 400) pages.push({ id: `P${pages.length + 1}`, url: canon(p.url), title: p.title, text: p.text });
+      const got = await readPages(fresh).catch((e) => (say(`page fetch failed (${e.message}); working from search snippets`, 'recover'), []));
+      for (const p of got) if (p.ok) pages.push({ id: `P${pages.length + 1}`, url: canon(p.url), title: p.title, text: p.text });
     };
     const extract = async (keys: string[]) => {
       const snippets = dedupe(results).slice(0, 16).map((r, i) => ({ id: `S${i + 1}`, url: canon(r.url), title: r.title, text: `${r.title}. ${r.snippet}` }));

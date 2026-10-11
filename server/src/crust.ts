@@ -181,3 +181,45 @@ export function htmlToText(html: string) {
     .trim()
     .slice(0, 40_000);
 }
+
+// ---- Free first, paid second ------------------------------------------------------------------
+
+const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
+
+/** Fetch a page ourselves. Costs nothing; fails on bot walls and dead sites. */
+export const directFetch = tool('web.direct_fetch', async (url: string) => {
+  try {
+    const res = await fetch(url, { headers: { 'user-agent': UA, accept: 'text/html' }, redirect: 'follow', signal: AbortSignal.timeout(8000) });
+    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('html')) return { url, ok: false, title: '', text: '' };
+    const html = (await res.text()).slice(0, 2_000_000);
+    return { url: res.url || url, ok: true, title: html.match(/<title[^>]*>([^<]*)/i)?.[1]?.trim() ?? '', text: htmlToText(html) };
+  } catch {
+    return { url, ok: false, title: '', text: '' };
+  }
+});
+
+/** A bot-check or empty shell isn't a page. */
+export function usablePage(p?: { ok: boolean; text: string }) {
+  if (!p?.ok || p.text.length < 400) return false;
+  return !/checking your browser|just a moment|enable javascript and cookies|verify you are human|attention required|access denied/i.test(p.text.slice(0, 1500));
+}
+
+/** Read pages: our own fetch first (free), Crustdata only for the ones that didn't come back usable. */
+export async function readPages(urls: string[], opts: { humanRetry?: boolean } = {}) {
+  const first = await Promise.all(urls.map((u) => directFetch(u)));
+  const missing = urls.filter((_, i) => !usablePage(first[i]));
+  const out = new Map(urls.map((u, i) => [u, first[i]]));
+  if (missing.length) {
+    const paid = await webFetch(missing).catch(() => missing.map((u) => ({ url: u, ok: false, title: '', text: '' })));
+    paid.forEach((p, i) => out.set(missing[i], p));
+    if (opts.humanRetry) {
+      const still = missing.filter((u) => !usablePage(out.get(u)));
+      if (still.length) {
+        say(`${still.length} page${still.length > 1 ? 's' : ''} still blocked; retrying as a browser`, 'recover');
+        const human = await webFetch(still, true).catch(() => []);
+        human.forEach((p, i) => out.set(still[i], p));
+      }
+    }
+  }
+  return urls.map((u) => out.get(u)!).map((p) => ({ ...p, ok: usablePage(p) }));
+}

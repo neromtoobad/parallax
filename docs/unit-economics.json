@@ -1,62 +1,63 @@
 {
-  "generatedAt": "2026-10-11T07:38:29.292Z",
+  "generatedAt": "2026-10-11T08:05:51.646Z",
   "tags": [
-    "eval:v1",
-    "eval:v2"
+    "eval:v2",
+    "eval:v3",
+    "live-test"
   ],
   "services": {
     "company-brief": {
-      "jobs": 13,
+      "jobs": 14,
       "unit": "brief",
       "costPerUnit": {
-        "mean": 0.17730553846153846,
-        "p50": 0.168139,
-        "p75": 0.19462500000000002,
-        "max": 0.20919300000000002
+        "mean": 0.1937286428571429,
+        "p50": 0.20122800000000002,
+        "p75": 0.207721,
+        "max": 0.22018300000000002
       },
       "split": {
-        "models": 0.127676458933501,
-        "data": 0.872323541066499
+        "models": 0.15012085634543523,
+        "data": 0.8498791436545647
       },
-      "creditsPerUnit": 15.42153846153846,
-      "modelCallsPerJob": 5.3076923076923075,
-      "dataCallsPerJob": 11.23076923076923,
+      "creditsPerUnit": 16.454285714285714,
+      "modelCallsPerJob": 6.357142857142857,
+      "dataCallsPerJob": 12.785714285714286,
       "secondsPerJob": {
-        "p50": 115.651,
-        "p75": 416.183
+        "p50": 416.183,
+        "p75": 464.809
       },
       "partialDeliveries": 0,
       "sampleTraces": [
-        "38a8e30a3aac86fe645856cce56f9d77",
-        "6a0908bd9e50aa37ad6fbab2f7b3ad89",
-        "216434b7f95857781a4fcb84f12fc824"
+        "e308fba56daba1a0662c99d12686885a",
+        "b50981c33c06a71018c76723d7cb81e6",
+        "207ba28a0af0718035b0803ea0bc453f"
       ]
     },
     "lead-list": {
-      "jobs": 3,
+      "jobs": 4,
       "unit": "delivered lead",
       "costPerUnit": {
-        "mean": 0.10209120000000005,
-        "p50": 0.09458140000000005,
-        "p75": 0.15760000000000007,
-        "max": 0.15760000000000007
+        "mean": 0.14250880000000007,
+        "p50": 0.11578940000000004,
+        "p75": 0.3478180000000002,
+        "max": 0.3478180000000002
       },
       "split": {
-        "models": 0.06017532152742966,
-        "data": 0.9398246784725703
+        "models": 0.057157336682297374,
+        "data": 0.9428426633177026
       },
-      "creditsPerUnit": 9.580666666666666,
-      "modelCallsPerJob": 19,
-      "dataCallsPerJob": 35,
+      "creditsPerUnit": 13.496,
+      "modelCallsPerJob": 13.5,
+      "dataCallsPerJob": 30.5,
       "secondsPerJob": {
-        "p50": 206.779,
-        "p75": 255.018
+        "p50": 397.491,
+        "p75": 430.306
       },
       "partialDeliveries": 1,
       "sampleTraces": [
-        "77b4f10a6812fe1f0c9d402658b8bc78",
-        "44d6387408e551fa50ef183943224036",
-        "1ae8951c1a8b2aff1b273636ebd06bd4"
+        "b4406f831223aa36a49be0051e3f0f51",
+        "e715da87ea1a7c9f605c64da63efcdd3",
+        "face1492bd7dd177a80565dfc01fc9aa"
       ]
     }
   }

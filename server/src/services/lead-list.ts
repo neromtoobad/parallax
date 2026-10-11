@@ -1,10 +1,11 @@
 import { BudgetExceeded, say, step } from '../context.ts';
-import { companySearch, peopleAt, webFetch, webSearch } from '../crust.ts';
+import { companySearch, peopleAt, readPages, webSearch } from '../crust.ts';
 import { json } from '../llm.ts';
 import { quoteOnPage } from '../agents/compare.ts';
 import { personOf } from './company-brief.ts';
 import { emit } from '../store.ts';
 import type { Job, Lead } from '../types.ts';
+import { resolve4, resolve6 } from 'node:dns/promises';
 
 /**
  * Lead list: N companies that fit the client's ideal customer, each with the right person to
@@ -73,13 +74,16 @@ export async function runLeadList(job: Job) {
         if (inRange.length < fresh.length) say(`${fresh.length - inRange.length} companies outside the ${intake.headcountMin ?? 0}-${intake.headcountMax ?? '∞'} employee range`, 'step');
         if (!inRange.length) return [];
         const r = await json<{ keep: { i: number; why: string }[] }>({
-          system: "Screen companies for a client's ideal customer profile using their database descriptions. Keep only clear fits, best first. Drop agencies, consultancies, freelancers and companies whose description doesn't show the fit.",
+          system: "Screen companies for a client's ideal customer profile using their database descriptions. Keep only clear fits, best first. Drop agencies, consultancies, law firms, foundations, accelerators, freelancers and companies whose description doesn't show the fit. A company that IS the kind of company described is a fit; don't require it to sell to that kind of company unless the profile says so.",
           user: `Ideal customer: ${intake.icp}\nCandidates:\n${inRange.map((c: any, i: number) => `${i}. ${c.name} (${c.domain}), ${c.headcount ?? '?'} staff, ${c.country ?? '?'}: ${(c.description ?? '').slice(0, 220)}`).join('\n')}\n\nReturn {"keep": [{"i": number, "why": string}]}`,
           check: (v) => (!Array.isArray(v?.keep) ? 'keep must be an array' : null),
         });
         const kept = r.keep.filter((k) => inRange[k.i]).map((k) => inRange[k.i]);
-        say(`Screened ${inRange.length} candidates on their database profiles; ${kept.length} worth checking`, 'step');
-        return kept;
+        // The database still lists companies that are gone. A DNS lookup is free; a page fetch isn't.
+        const alive = await Promise.all(kept.map((c: any) => resolves(c.domain)));
+        const live = kept.filter((_: any, i: number) => alive[i]);
+        say(`Screened ${inRange.length} candidates on their database profiles; ${kept.length} worth checking${live.length < kept.length ? `, ${kept.length - live.length} with dead domains skipped` : ''}`, 'step');
+        return live;
       });
 
       // Three at a time: fast, and well inside Crustdata's per-minute limits.
@@ -140,12 +144,7 @@ async function checkLead(intake: Intake, c: { name: string; domain: string; desc
 
   // Field angle 1: does the company's own site say it fits?
   say(`Reading ${c.domain}`, 'tool');
-  let [site] = await webFetch([`https://${c.domain}`]);
-  if (!usable(site)) {
-    say(`${c.domain} didn't load; retrying as a browser`, 'recover');
-    [site] = await webFetch([`https://www.${c.domain}`], true);
-  }
-  if (!usable(site)) site = { ...site, ok: false };
+  const [site] = await readPages([`https://${c.domain}`], { humanRetry: true });
   checks.push({ name: 'site is live', ok: !!site?.ok, note: site?.ok ? site.title.slice(0, 80) : 'could not load the homepage' });
   if (!site?.ok) return drop('website did not load');
 
@@ -199,13 +198,6 @@ const FILLER = new Set(['of', 'and', 'the', '&', 'for', 'at']);
 const toks = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter((w) => w && !FILLER.has(w));
 
 /** Position of the first wanted title whose every word is a whole word in this title ("CTO" no longer matches "Director"). */
-/** A bot-check or empty shell isn't a homepage; it can't show fit. */
-function usable(p?: { ok: boolean; text: string }) {
-  if (!p?.ok) return false;
-  if (p.text.length < 400) return false;
-  return !/checking your browser|just a moment|enable javascript and cookies|verify you are human|attention required|access denied/i.test(p.text.slice(0, 1500));
-}
-
 function rank(title: string, order: string[]) {
   const t = new Set(toks(title));
   const i = order.findIndex((o) => {
@@ -221,4 +213,14 @@ function toCsv(leads: Lead[]) {
   const rows = [['company', 'domain', 'contact', 'title', 'profile', 'fit', 'web_confirmed']];
   for (const l of leads) rows.push([l.company.name, l.company.domain, l.person?.name ?? '', l.person?.title ?? '', l.person?.profileUrl ?? '', l.fit, String(!!l.checks.find((c) => c.name === 'person on the web')?.ok)]);
   return rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+}
+
+/** Does the domain resolve at all? Dead companies' domains often don't. */
+async function resolves(domain: string) {
+  const t = new Promise<boolean>((r) => setTimeout(() => r(true), 4000)); // slow DNS: give it the benefit of the doubt
+  const look = Promise.any([resolve4(domain), resolve4(`www.${domain}`), resolve6(domain)]).then(
+    () => true,
+    () => false,
+  );
+  return Promise.race([look, t]);
 }
