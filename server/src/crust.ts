@@ -77,10 +77,29 @@ export const COMPANY_FIELDS = [
 
 export const companySearch = tool('crustdata.company_search', async (q: { query: string; country?: string; limit?: number; cursor?: string }) => {
   const body: any = { search: { query: q.query, mode: 'hybrid' }, fields: COMPANY_FIELDS, limit: q.limit ?? 10 };
-  if (q.country) body.filters = { field: 'locations.country', type: '=', value: q.country };
+  if (q.country) body.filters = { field: 'locations.country', type: 'in', value: countryNames(q.country) };
   if (q.cursor) body.cursor = q.cursor;
   return call<{ companies: any[]; next_cursor: string | null }>('/company/search', body, 0.5);
 });
+
+/** The database spells countries several ways ("United States", "USA", ...); match them all. */
+const COUNTRY_ALIASES: string[][] = [
+  ['United States', 'USA', 'United States of America', 'US'],
+  ['United Kingdom', 'UK', 'GBR', 'Great Britain'],
+  ['United Arab Emirates', 'UAE', 'ARE'],
+  ['Nigeria', 'NGA'],
+  ['Kenya', 'KEN'],
+  ['South Africa', 'ZAF'],
+  ['Ghana', 'GHA'],
+  ['India', 'IND'],
+  ['Germany', 'DEU'],
+  ['France', 'FRA'],
+  ['Canada', 'CAN'],
+];
+export function countryNames(c: string) {
+  const hit = COUNTRY_ALIASES.find((g) => g.some((x) => x.toLowerCase() === c.trim().toLowerCase()));
+  return hit ?? [c.trim()];
+}
 
 export const companyEnrich = tool('crustdata.company_enrich', async (domain: string) => {
   const res = await call<any[]>('/company/enrich', { domains: [domain], fields: ['basic_info', 'headcount', 'funding', 'locations', 'hiring'] }, 2);

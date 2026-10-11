@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { hostname } from 'node:os';
 import { env } from './env.ts';
 import type { Job, JobEvent } from './types.ts';
 
@@ -13,6 +14,7 @@ const cache = new Map<string, Job>();
 
 export function saveJob(job: Job) {
   job.updatedAt = Date.now();
+  if (job.status === 'running') job.lease = { pid: process.pid, host: hostname(), at: Date.now() };
   cache.set(job.id, job);
   const file = join(jobsDir, `${job.id}.json`);
   // Write then rename, so a crash mid-write never leaves a half-written checkpoint.
@@ -66,4 +68,18 @@ export function onJob(fn: (j: Job) => void) {
 
 export function newId(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/** Is another live process still working this job? */
+export function leaseHeld(job: Job) {
+  const l = job.lease;
+  if (!l || l.pid === process.pid) return false;
+  if (Date.now() - l.at > 5 * 60_000) return false; // no checkpoint for 5 minutes: treat as dead
+  if (l.host !== hostname()) return true;
+  try {
+    process.kill(l.pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }

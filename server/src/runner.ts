@@ -1,7 +1,7 @@
 import { setTraceOutput, trace } from 'neatlogs';
 import { BudgetExceeded, short } from './context.ts';
 import { closeBooks } from './agents/cfo.ts';
-import { emit, getJob, listJobs, newId, saveJob } from './store.ts';
+import { emit, getJob, leaseHeld, listJobs, newId, saveJob } from './store.ts';
 import { quote } from './agents/cfo.ts';
 import { SERVICES as CATALOG } from './catalog.ts';
 import { runCompanyBrief } from './services/company-brief.ts';
@@ -126,7 +126,7 @@ export function approveMore(id: string, factor = 1.5) {
 /** On boot: anything that was mid-run when the process died gets picked up again. */
 export function resumeInterrupted() {
   for (const j of listJobs()) {
-    if (j.status === 'running') {
+    if (j.status === 'running' && !leaseHeld(j)) {
       emit(j, { agent: 'system', kind: 'recover', text: 'The server restarted mid-job; resuming from the last saved step' });
       void runJob(j.id);
     }

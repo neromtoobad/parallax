@@ -95,6 +95,8 @@ export interface Job {
   traces: string[];
   runs: number;
   eventCount?: number;
+  /** Which process is running this job, and when it last checkpointed. Crash recovery only takes over a dead lease. */
+  lease?: { pid: number; host: string; at: number };
   /** Set when started by the eval harness, so the books can tell test runs from client jobs. */
   tag?: string;
 }

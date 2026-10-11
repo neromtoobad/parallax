@@ -23,6 +23,8 @@ app.route('/api', api);
 const server = serve({ fetch: app.fetch, port: env.port }, (i) => {
   console.log(`parallax api on :${i.port} (neatlogs ${env.neatlogsKey ? 'on' : 'off'}, crustdata ${env.crustKey ? 'on' : 'off'}, models ${env.litellmKey ? 'on' : 'off'})`);
   resumeInterrupted();
+  // A lease from a container that was replaced looks alive until it goes stale; check again every minute.
+  setInterval(resumeInterrupted, 60_000);
 });
 
 async function stop() {
