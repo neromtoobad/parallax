@@ -1,7 +1,7 @@
 # Parallax: business plan (cfo.ai)
 
 Built by Ari (cfo.ai) on Oct 11 2026 from [`business-plan-brief.md`](business-plan-brief.md), which uses unit costs measured from real jobs ([`unit-economics.md`](unit-economics.md)).
-The model lives in our cfo.ai workspace as four pages: Assumptions, Customers and Revenue, Cash and Hiring, and Cost Sensitivity, with Base, Growth and Downside scenarios.
+**Live model (view-only): https://cfo.ai/s/otTA-690Qi0JrZV0.** It has four pages: Assumptions, Customers and Revenue, Cash and Hiring, and Cost Sensitivity. The link opens on the main scenario, and the Growth and Downside scenarios are in the same model.
 It runs 24 months, from October 2026 to September 2028.
 
 **Independent check.** We recomputed the three scenarios in a short script using the same conventions. Ari's headline numbers match ours to the dollar:

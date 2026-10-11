@@ -79,7 +79,7 @@ Trace IDs for every row are in `server/evals/v1-vs-v2.md`.
 - `server/scripts/unit-economics.ts` → `docs/unit-economics.md`: measured cost per brief and per lead from delivered jobs. Data is about 90% of the cost; models 6–13%.
 - `docs/business-plan-brief.md`: pricing, assumptions, scenarios and the prompt for cfo.ai (Ari). cfo.ai's MCP server is in `.mcp.json`.
 - Refreshed after v4. Unit costs now cover all seven services, measured on the current pipeline from 24 delivered jobs (`--tags eval:v4,dev`), and the brief prices every service.
-- **The cfo.ai plan** (`docs/business-plan.md`). Ari built a 24-month model in our cfo.ai workspace: Base, Growth and Downside scenarios, cash and hiring, and cost sensitivity. We checked its headline numbers with our own script and they match to the dollar.
+- **The cfo.ai plan** (`docs/business-plan.md`; view-only model: https://cfo.ai/s/otTA-690Qi0JrZV0). Ari built a 24-month model in our cfo.ai workspace: Base, Growth and Downside scenarios, cash and hiring, and cost sensitivity. We checked its headline numbers with our own script and they match to the dollar.
   - **Gross margin** is about 83% after payment fees.
   - **The founder's salary causes a cash gap.** In the Base case, the $3,000/mo draw from month 7 runs out the $2,000 starting cash in month 9. The business needs a ~$7.7k bridge until it turns cash-flow positive again in month 15.
   - **First engineer:** only the Growth case can hire one, from month 10 at the earliest. Ari's safer pick is month 13.
@@ -150,6 +150,6 @@ Pending.
 - [ ] Demo video, 3 min max, covering neatlogs, Entire and cfo.ai
 - [ ] neatlogs traces: a before/after pair with numbers, and a recovery run
 - [ ] Entire checkpoints / entire-graph output
-- [x] cfo.ai business plan (pricing, costs, revenue, runway): `docs/business-plan.md` (share link still to add)
+- [x] cfo.ai business plan (pricing, costs, revenue, runway): `docs/business-plan.md`, live model at https://cfo.ai/s/otTA-690Qi0JrZV0
 - [ ] Building-in-public posts tagged #neatHack
 - [ ] Quote-post the official neatlogs submission post (window: Oct 12, 7:00–11:55 PM IST)
