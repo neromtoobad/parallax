@@ -1,0 +1,24 @@
+{
+  "name": "parallax-server",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node --env-file-if-exists=../.env --watch src/main.ts",
+    "start": "node --env-file-if-exists=../.env src/main.ts",
+    "job": "node --env-file-if-exists=../.env scripts/job.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.4",
+    "hono": "^4.13.13",
+    "neatlogs": "^1.1.28",
+    "openai": "^6.49.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,179 @@
+import { Hono } from 'hono';
+import { cors } from 'hono/cors';
+import { streamSSE } from 'hono/streaming';
+import { history, quote, unitsOf } from './agents/cfo.ts';
+import { env } from './env.ts';
+import { approveMore, runJob } from './runner.ts';
+import { getJob, listJobs, newId, onEvent, onJob, readEvents, saveJob } from './store.ts';
+import { emptySpend, type Job, type ServiceId } from './types.ts';
+
+export const SERVICES: { id: ServiceId; name: string; blurb: string; fields: { name: string; label: string; placeholder: string; type?: string }[] }[] = [
+  {
+    id: 'company-brief',
+    name: 'Company brief',
+    blurb: 'Everything you need before a sales call, pitch or partnership chat. Every fact checked from two angles.',
+    fields: [
+      { name: 'company', label: 'Company', placeholder: 'Linear, or linear.app' },
+      { name: 'purpose', label: 'What is it for?', placeholder: 'Sales call with their Head of Ops next week' },
+    ],
+  },
+  {
+    id: 'lead-list',
+    name: 'Lead list',
+    blurb: 'Companies that fit your ideal customer, each with the right person to contact. Every lead checked from two angles.',
+    fields: [
+      { name: 'icp', label: 'Who are you looking for?', placeholder: 'Seed to Series A fintech startups in Nigeria' },
+      { name: 'titles', label: 'Who should we contact?', placeholder: 'CTO or Head of Engineering' },
+      { name: 'count', label: 'How many leads?', placeholder: '10', type: 'number' },
+    ],
+  },
+];
+
+export const api = new Hono();
+api.use('*', cors());
+
+api.get('/health', (c) =>
+  c.json({ ok: true, keys: { litellm: !!env.litellmKey, neatlogs: !!env.neatlogsKey, crustdata: !!env.crustKey }, models: env.models, chaos: env.chaos }),
+);
+
+api.get('/services', (c) => c.json(SERVICES.map((s) => ({ ...s, history: history(s.id).length }))));
+
+/** The CFO quotes before any money is spent. */
+api.post('/quote', async (c) => {
+  const body = await c.req.json<{ service: ServiceId; input: Record<string, any>; client?: Job['client']; tag?: string }>();
+  const svc = SERVICES.find((s) => s.id === body.service);
+  if (!svc) return c.json({ error: 'unknown service' }, 400);
+  const input = Object.fromEntries(Object.entries(body.input ?? {}).map(([k, v]) => [k, typeof v === 'string' ? v.trim().slice(0, 500) : v]));
+  if (input.count != null) input.count = Math.max(1, Math.min(25, Number(input.count) || 10));
+  const brief = svc.fields.map((f) => (input[f.name] ? `${f.label} ${input[f.name]}` : '')).filter(Boolean).join('\n');
+  if (!brief) return c.json({ error: 'empty brief' }, 400);
+  const job: Job = {
+    id: newId('job'),
+    service: svc.id,
+    brief,
+    input,
+    client: body.client,
+    status: 'quoted',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    steps: {},
+    spend: emptySpend(),
+    traces: [],
+    runs: 0,
+    tag: body.tag,
+  };
+  job.quote = quote(job);
+  saveJob(job);
+  return c.json(view(job));
+});
+
+api.post('/jobs/:id/accept', (c) => {
+  const job = getJob(c.req.param('id'));
+  if (!job) return c.json({ error: 'not found' }, 404);
+  if (job.status !== 'quoted') return c.json({ error: `job is ${job.status}` }, 409);
+  void runJob(job.id);
+  return c.json(view(job));
+});
+
+/** Resume a failed job from its last saved step. */
+api.post('/jobs/:id/resume', (c) => {
+  const job = getJob(c.req.param('id'));
+  if (!job) return c.json({ error: 'not found' }, 404);
+  if (job.status !== 'failed') return c.json({ error: `job is ${job.status}` }, 409);
+  void runJob(job.id);
+  return c.json(view(job));
+});
+
+api.post('/jobs/:id/approve', (c) => {
+  const job = approveMore(c.req.param('id'));
+  return job ? c.json(view(job)) : c.json({ error: 'job is not paused' }, 409);
+});
+
+api.get('/jobs', (c) => c.json(listJobs().slice(0, 100).map(summary)));
+
+api.get('/jobs/:id', (c) => {
+  const job = getJob(c.req.param('id'));
+  return job ? c.json(view(job)) : c.json({ error: 'not found' }, 404);
+});
+
+api.get('/jobs/:id/events', (c) => {
+  const id = c.req.param('id');
+  if (!getJob(id)) return c.json({ error: 'not found' }, 404);
+  return streamSSE(c, async (stream) => {
+    for (const e of readEvents(id)) await stream.writeSSE({ event: 'event', data: JSON.stringify(e) });
+    const queue: string[] = [];
+    let wake: (() => void) | null = null;
+    const push = (name: string, data: unknown) => {
+      queue.push(JSON.stringify({ name, data }));
+      wake?.();
+    };
+    const offE = onEvent(id, (e) => push('event', e));
+    const offJ = onJob((j) => j.id === id && push('job', view(j)));
+    stream.onAbort(() => {
+      offE();
+      offJ();
+      wake?.();
+    });
+    push('job', view(getJob(id)!));
+    while (!stream.aborted) {
+      while (queue.length) {
+        const { name, data } = JSON.parse(queue.shift()!);
+        await stream.writeSSE({ event: name, data: JSON.stringify(data) });
+      }
+      await new Promise<void>((r) => {
+        wake = r;
+        setTimeout(r, 15_000);
+      });
+      wake = null;
+      if (!queue.length) await stream.writeSSE({ event: 'ping', data: '{}' });
+    }
+  });
+});
+
+/** The CFO's books: every delivered job, priced vs. what it cost. */
+api.get('/books', (c) => {
+  const jobs = listJobs().filter((j) => j.status === 'delivered' || j.status === 'paused' || j.status === 'failed');
+  const delivered = jobs.filter((j) => j.status === 'delivered');
+  const revenue = delivered.reduce((a, j) => a + (j.result?.books?.revenueUsd ?? 0), 0);
+  const cost = jobs.reduce((a, j) => a + j.spend.totalUsd, 0);
+  const perService = SERVICES.map((s) => {
+    const h = history(s.id, 50);
+    const units = h.map((x) => x.perUnit).sort((a, b) => a - b);
+    return {
+      service: s.id,
+      jobs: h.length,
+      unit: s.id === 'lead-list' ? 'lead' : 'brief',
+      medianCostPerUnit: units.length ? units[Math.floor(units.length / 2)] : null,
+      p75CostPerUnit: units.length ? units[Math.min(units.length - 1, Math.floor(units.length * 0.75))] : null,
+      nextQuote: quote({ service: s.id, input: { count: 10 } }),
+    };
+  });
+  return c.json({
+    totals: { jobs: jobs.length, delivered: delivered.length, revenueUsd: revenue, costUsd: cost, marginPct: revenue ? ((revenue - cost) / revenue) * 100 : 0 },
+    perService,
+    jobs: jobs.slice(0, 50).map((j) => ({ ...summary(j), books: j.result?.books, units: unitsOf(j) })),
+  });
+});
+
+function summary(j: Job) {
+  return {
+    id: j.id,
+    service: j.service,
+    brief: j.brief,
+    status: j.status,
+    createdAt: j.createdAt,
+    updatedAt: j.updatedAt,
+    priceUsd: j.result?.priceUsd ?? j.quote?.priceUsd,
+    costUsd: j.spend.totalUsd,
+    stats: j.result?.stats,
+    tag: j.tag,
+    runs: j.runs,
+  };
+}
+
+function view(j: Job) {
+  const { steps, ...rest } = j;
+  // Field's fetched pages are big; the client only needs the step list.
+  const s = Object.values(steps).map(({ output, ...m }) => m);
+  return { ...rest, steps: s };
+}
