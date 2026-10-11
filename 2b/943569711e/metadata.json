@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "2b943569711e",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "server/src/agents/cfo.ts",
+    "web/src/components/HeroReplay.tsx"
+  ],
+  "sessions": [
+    {
+      "metadata": "/2b/943569711e/0/metadata.json",
+      "transcript": "/2b/943569711e/0/full.jsonl",
+      "compact_transcript": "/2b/943569711e/0/transcript.jsonl",
+      "content_hash": "/2b/943569711e/0/content_hash.txt",
+      "prompt": "/2b/943569711e/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 8,
+    "cache_creation_tokens": 2009,
+    "cache_read_tokens": 1211507,
+    "output_tokens": 1141,
+    "api_call_count": 4
+  }
+}
