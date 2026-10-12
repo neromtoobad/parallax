@@ -1,0 +1,486 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Parallax reel</title>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=block" rel="stylesheet" />
+<style>
+  :root {
+    --canvas: #e9e7f0;
+    --dot: #cdc9dc;
+    --ink: #111016;
+    --paper: #ffffff;
+    --blue: #2f56d6;    /* Records: the database angle */
+    --orange: #d4612c;  /* Field: the open-web angle, and the one accent */
+    --green: #2b8a4a;
+    --red: #c3362d;
+    --amber: #b7791f;
+    --muted: #8a889c;
+    --muted-d: rgba(255, 255, 255, 0.46);
+    --hair: #e6e4ee;
+    --hair-d: rgba(255, 255, 255, 0.1);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--canvas); }
+  body { font-family: Geist, system-ui, sans-serif; -webkit-font-smoothing: antialiased; color: var(--ink); letter-spacing: -0.01em; }
+  .mono { font-family: "Geist Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; letter-spacing: 0.06em; text-transform: uppercase; }
+  .tnum { font-variant-numeric: tabular-nums; }
+  .light { font-weight: 300; letter-spacing: -0.035em; }
+  #stage { position: absolute; inset: 0; overflow: hidden; }
+  #world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  #grid { position: absolute; left: -8000px; top: -8000px; width: 16000px; height: 16000px; background-size: 32px 32px; }
+  #shape { position: absolute; overflow: hidden; transform-origin: 50% 50%; }
+  .content { position: absolute; left: 50%; top: 50%; transform-origin: 50% 50%; display: none; }
+  .on-dark { color: #fff; }
+  #cursor { position: absolute; left: 0; top: 0; width: 40px; height: 40px; transform-origin: 7px 5px; pointer-events: none; z-index: 10; }
+  svg.i { display: block; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+  .btn { display: flex; align-items: center; justify-content: center; gap: 10px; border-radius: 14px; font-weight: 500; transform-origin: 50% 50%; }
+  .btn.dark { background: var(--ink); color: #fff; }
+  .btn.light { background: #fff; color: var(--ink); }
+  .row { display: flex; align-items: center; justify-content: space-between; }
+  .lbl { font-size: 13px; color: var(--muted); }
+  .on-dark .lbl { color: var(--muted-d); }
+  .av { position: relative; overflow: hidden; border-radius: 50%; flex: none; background: #efedf6; }
+  .av img { position: absolute; left: 50%; display: block; }
+  .on-dark .av { background: #24222c; }
+  .strike, .under { position: relative; white-space: nowrap; }
+  .strike i, .under i { position: absolute; left: -0.04em; height: 0.075em; border-radius: 0.04em; background: var(--orange); width: 0; }
+  .strike i { top: 54%; }
+  .under i { top: 104%; }
+  .field { height: 54px; border: 1px solid var(--hair); border-radius: 12px; display: flex; align-items: center; padding: 0 16px; font-size: 18px; margin-top: 8px; position: relative; }
+  .caret { display: inline-block; width: 2px; height: 22px; background: var(--ink); margin-left: 1px; vertical-align: -4px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 15px; font-size: 13px; font-weight: 500; white-space: nowrap; }
+  .chip.agree { background: #e2f3e7; color: var(--green); }
+  .chip.conflict { background: #fbe5e3; color: var(--red); }
+  .chip.settled { background: #fcebe2; color: var(--orange); }
+  .tr-row { display: flex; align-items: center; height: 38px; gap: 12px; font-size: 16px; position: relative; }
+  .kind { font-size: 10.5px; padding: 3px 7px; border-radius: 5px; border: 1px solid var(--hair-d); color: var(--muted-d); }
+  .dur { margin-left: auto; font-size: 13px; color: var(--muted-d); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="world">
+    <div id="grid"></div>
+    <div id="shape">
+
+      <!-- 1. start: the mark as a pill (ink) -->
+      <div class="content on-dark" id="c-start" data-w="340" data-h="96">
+        <div style="height:100%;display:flex;align-items:center;justify-content:center;gap:16px;font-size:32px;font-weight:500;letter-spacing:-.03em">
+          <span class="mark" data-size="44"></span><span>Parallax</span>
+        </div>
+      </div>
+
+      <!-- 2. problem (ink, full) -->
+      <div class="content on-dark" id="c-problem" data-w="1600" data-h="860">
+        <div style="position:absolute;left:150px;top:250px;right:150px">
+          <div id="pb-l1" class="light" style="font-size:96px;line-height:1.08">Research agents <span class="strike">sound sure.<i id="pb-strike"></i></span></div>
+          <div id="pb-l2" class="light" style="font-size:96px;line-height:1.08;color:var(--orange)">Often, they're wrong.</div>
+          <div id="pb-notes" style="display:flex;gap:14px;margin-top:64px">
+            <div id="pb-n0" class="mono" style="font-size:19px;color:rgba(255,255,255,.72);border:1px solid rgba(255,255,255,.18);border-radius:12px;padding:14px 20px">CEO · left last year</div>
+            <div id="pb-n1" class="mono" style="font-size:19px;color:rgba(255,255,255,.72);border:1px solid rgba(255,255,255,.18);border-radius:12px;padding:14px 20px">Headcount · 2023 data</div>
+            <div id="pb-n2" class="mono" style="font-size:19px;color:rgba(255,255,255,.72);border:1px solid rgba(255,255,255,.18);border-radius:12px;padding:14px 20px">Lead · changed jobs</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. question (paper, full) -->
+      <div class="content" id="c-question" data-w="1600" data-h="860">
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center">
+          <div id="qs-l1" class="light" style="font-size:100px;line-height:1.1">What if every answer</div>
+          <div id="qs-l2" class="light" style="font-size:100px;line-height:1.1">was checked from <span class="under">two angles?<i id="qs-under"></i></span></div>
+        </div>
+      </div>
+
+      <!-- 4. hire (paper card) -->
+      <div class="content" id="c-hire" data-w="620" data-h="560">
+        <div style="padding:42px 44px 0">
+          <div class="mono lbl">Sales · before the call</div>
+          <div style="font-size:38px;font-weight:600;letter-spacing:-.035em;margin-top:8px">Company brief</div>
+          <div style="margin-top:28px;font-size:14px;color:var(--muted)">Company</div>
+          <div class="field" id="hr-f1"><span id="hr-t1"></span><span class="caret" id="hr-c1"></span></div>
+          <div style="margin-top:20px;font-size:14px;color:var(--muted)">What is it for?</div>
+          <div class="field" id="hr-f2"><span id="hr-t2"></span><span class="caret" id="hr-c2"></span></div>
+        </div>
+        <div id="hr-btn" class="btn dark" style="position:absolute;left:44px;right:44px;bottom:40px;height:60px;font-size:19px">Get a quote <span data-icon="arrow" data-size="20"></span></div>
+      </div>
+
+      <!-- 5. quote with hold-to-hire (ink card) -->
+      <div class="content on-dark" id="c-quote" data-w="560" data-h="440">
+        <div style="padding:38px 40px 0">
+          <div style="display:flex;align-items:center;gap:14px">
+            <span class="avatar" data-who="cfo" data-size="54"></span>
+            <div><div class="mono lbl">CFO</div><div style="font-size:17px;margin-top:3px;color:rgba(255,255,255,.82)">Priced from what 12 briefs really cost.</div></div>
+          </div>
+          <div id="qt-price" class="tnum" style="margin-top:30px;font-size:96px;font-weight:300;letter-spacing:-.05em;line-height:96px;height:96px"></div>
+          <div class="mono" style="margin-top:16px;font-size:13px;color:var(--muted-d)">Expected cost $0.20 &nbsp;·&nbsp; hard cap $0.51</div>
+        </div>
+        <div id="qt-btn" class="btn light" style="position:absolute;left:40px;right:40px;bottom:36px;height:62px;font-size:19px;gap:14px;border-radius:31px">
+          <svg width="30" height="30" viewBox="0 0 30 30"><circle cx="15" cy="15" r="11" fill="none" stroke="#e3e1ee" stroke-width="3"/><circle id="qt-arc" cx="15" cy="15" r="11" fill="none" style="stroke:var(--orange)" stroke-width="3" stroke-linecap="round" pathLength="1" stroke-dasharray="1 1" stroke-dashoffset="1" transform="rotate(-90 15 15)"/></svg>
+          <span id="qt-lbl">Hold to hire the team</span>
+        </div>
+      </div>
+
+      <!-- 6. two angles side by side (paper, wide) -->
+      <div class="content" id="c-angles" data-w="1240" data-h="570">
+        <div style="padding:40px 48px 0">
+          <div class="row" style="height:60px">
+            <div style="width:190px" class="mono lbl">Supabase</div>
+            <div id="an-h1" style="width:330px;display:flex;align-items:center;gap:12px"><span class="avatar" data-who="records" data-size="46"></span><div><div class="mono" style="font-size:13px;color:var(--blue)">Records</div><div style="font-size:15px;color:var(--muted)">the databases</div></div></div>
+            <div id="an-h2" style="width:330px;display:flex;align-items:center;gap:12px"><span class="avatar" data-who="field" data-size="46"></span><div><div class="mono" style="font-size:13px;color:var(--orange)">Field</div><div style="font-size:15px;color:var(--muted)">the open web</div></div></div>
+            <div style="width:190px;text-align:right" class="mono lbl">Neither sees<br>the other</div>
+          </div>
+          <div id="an-rows" style="margin-top:24px;border-top:1px solid var(--hair)"></div>
+        </div>
+      </div>
+
+      <!-- 7. arbiter tiebreak (ink) -->
+      <div class="content on-dark" id="c-arbiter" data-w="860" data-h="410">
+        <div style="padding:40px 46px 0">
+          <div style="display:flex;align-items:center;gap:14px">
+            <span class="avatar" data-who="arbiter" data-size="54"></span>
+            <div><div class="mono lbl">Arbiter · tiebreak</div><div style="font-size:20px;margin-top:3px">Employees</div></div>
+          </div>
+          <div style="display:flex;gap:44px;margin-top:30px;align-items:baseline">
+            <div><div class="mono" style="font-size:12px;color:#8ea6f5">Records</div><div class="light" style="font-size:64px;margin-top:4px"><span class="strike">439<i id="ab-s1"></i></span></div></div>
+            <div><div class="mono" style="font-size:12px;color:#f0a27d">Field</div><div class="light" style="font-size:64px;margin-top:4px"><span class="strike">120<i id="ab-s2"></i></span></div></div>
+            <div id="ab-res" style="margin-left:auto;text-align:right"><div class="mono" style="font-size:12px;color:#7fd39a">Settled</div><div class="light" style="font-size:64px;margin-top:4px;color:#fff">350+</div></div>
+          </div>
+          <div id="ab-src" style="margin-top:26px;border:1px solid var(--hair-d);border-radius:14px;padding:16px 18px;display:flex;align-items:center;gap:14px">
+            <span data-icon="search" data-size="20" style="color:var(--muted-d)"></span>
+            <div style="flex:1;min-width:0"><div class="mono" style="font-size:12px;color:var(--muted-d)">supabase.com/careers · their own page</div><div id="ab-q" style="font-size:19px;margin-top:4px;white-space:nowrap"></div></div>
+            <div id="ab-ok" class="chip settled" style="background:rgba(212,97,44,.16)">Use this</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 8. verifier + writer (paper) -->
+      <div class="content" id="c-verify" data-w="720" data-h="560">
+        <div style="padding:38px 44px 0">
+          <div style="display:flex;align-items:center;gap:14px">
+            <span class="avatar" data-who="verifier" data-size="50"></span>
+            <div style="flex:1"><div class="mono lbl">Verifier</div><div style="font-size:22px;font-weight:600;letter-spacing:-.025em;margin-top:2px">Checked at the source</div></div>
+            <div class="tnum" style="display:flex;font-size:44px;font-weight:300;letter-spacing:-.04em;line-height:44px;height:44px"><span id="vf-n" style="height:44px;line-height:44px"></span><span style="color:var(--muted)">/7</span></div>
+          </div>
+          <div id="vf-rows" style="margin-top:22px;border-top:1px solid var(--hair)"></div>
+          <div id="vf-wr" style="margin-top:16px;display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;background:#fcebe2">
+            <span class="avatar" data-who="writer" data-size="32"></span>
+            <div style="font-size:15px;color:#8b3d18"><b style="font-weight:600">Writer:</b> draft 1 sent back. It used a number that isn't in the facts.</div>
+          </div>
+        </div>
+        <div id="vf-btn" class="btn dark" style="position:absolute;left:44px;right:44px;bottom:36px;height:58px;font-size:18px">Deliver the brief <span data-icon="arrow" data-size="20"></span></div>
+      </div>
+
+      <!-- 9. delivered pill (green) -->
+      <div class="content on-dark" id="c-done" data-w="880" data-h="112">
+        <div style="height:100%;display:flex;align-items:center;gap:18px;padding:0 40px 0 30px">
+          <div style="width:50px;height:50px;border-radius:25px;background:#fff;color:var(--green);display:flex;align-items:center;justify-content:center;flex:none"><span data-icon="check" data-size="26" data-stroke="2.4"></span></div>
+          <div style="font-size:30px;font-weight:500;letter-spacing:-.03em;white-space:nowrap">Delivered</div>
+          <div style="flex:1"></div>
+          <div id="dn-meta" class="mono" style="font-size:15px;color:rgba(255,255,255,.86);white-space:nowrap"></div>
+        </div>
+      </div>
+
+      <!-- 10. neatlogs trace (ink) -->
+      <div class="content on-dark" id="c-trace" data-w="1200" data-h="610">
+        <div style="position:absolute;left:56px;top:64px;width:360px">
+          <div class="mono lbl">Traced with neatlogs</div>
+          <div class="light" style="font-size:54px;line-height:1.08;margin-top:16px">Every step.<br>Every call.<br><span style="color:var(--orange)">Every cent.</span></div>
+          <div id="tr-det" style="margin-top:44px;border:1px solid rgba(195,54,45,.55);background:rgba(195,54,45,.12);border-radius:14px;padding:14px 16px">
+            <div class="mono" style="font-size:11.5px;color:#f08a80">Detection · execution failed</div>
+            <div style="font-size:15.5px;margin-top:6px;line-height:1.35;color:rgba(255,255,255,.88)">People map: Crustdata rate limit, 3 × 429. Retries now wait it out.</div>
+          </div>
+        </div>
+        <div id="tr-tree" style="position:absolute;left:470px;right:48px;top:52px;bottom:40px;border:1px solid var(--hair-d);border-radius:18px;padding:18px 22px"></div>
+      </div>
+
+      <!-- 11. crash and resume (paper) -->
+      <div class="content" id="c-recover" data-w="980" data-h="420">
+        <div style="padding:40px 48px 0">
+          <div class="mono lbl">Production · Paystack brief</div>
+          <div style="font-size:34px;font-weight:600;letter-spacing:-.035em;margin-top:8px">A deploy restarted the server mid-job.</div>
+          <div id="rc-track" style="position:relative;margin-top:46px;height:96px"></div>
+          <div id="rc-msg" style="font-size:19px;margin-top:6px"><b style="font-weight:600">Run 2</b> picked up from the last saved step. <span style="color:var(--muted)">6 steps kept, nothing paid twice.</span></div>
+        </div>
+      </div>
+
+      <!-- 12. proof (ink, wide) -->
+      <div class="content on-dark" id="c-proof" data-w="1500" data-h="520">
+        <div style="position:absolute;left:80px;top:76px" class="mono lbl">Same 9 test jobs · 4 versions of the team</div>
+        <div style="position:absolute;left:80px;right:80px;top:150px;display:flex;justify-content:space-between">
+          <div id="pf-0" style="width:400px"><div class="light tnum" style="font-size:118px;line-height:1"><span id="pf-v0"></span></div><div style="font-size:21px;margin-top:22px;color:rgba(255,255,255,.72)">known facts right,<br>every version</div></div>
+          <div id="pf-1" style="width:400px"><div class="light tnum" style="font-size:118px;line-height:1"><span id="pf-v1"></span></div><div style="font-size:21px;margin-top:22px;color:rgba(255,255,255,.72)">of brief lines guessing<br><span class="mono" style="font-size:14px;color:var(--orange)">was 39%</span></div></div>
+          <div id="pf-2" style="width:400px"><div class="light tnum" style="font-size:118px;line-height:1"><span id="pf-v2" style="height:118px;line-height:118px;vertical-align:top"></span></div><div style="font-size:21px;margin-top:22px;color:rgba(255,255,255,.72)">per verified lead<br><span class="mono" style="font-size:14px;color:var(--orange)">was $0.12</span></div></div>
+        </div>
+      </div>
+
+      <!-- 13. manifesto (paper, full) -->
+      <div class="content" id="c-manifesto" data-w="1600" data-h="860">
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center">
+          <div id="mf-0" class="light" style="font-size:88px;line-height:1.16">Records reads the databases.</div>
+          <div id="mf-1" class="light" style="font-size:88px;line-height:1.16">Field reads the web.</div>
+          <div id="mf-2" class="light" style="font-size:88px;line-height:1.16">Nothing ships <span class="under">unchecked.<i id="mf-under"></i></span></div>
+        </div>
+      </div>
+
+      <!-- 14. lockup (ink, full) -->
+      <div class="content on-dark" id="c-lockup" data-w="1600" data-h="860">
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+          <div style="display:flex;align-items:center;gap:30px">
+            <svg id="lk-mark" width="132" height="132" viewBox="0 0 32 32" style="overflow:visible">
+              <circle id="lk-c1" cx="12" cy="16" r="9" style="fill:var(--blue)" opacity=".92"/>
+              <circle id="lk-c2" cx="20" cy="16" r="9" style="fill:var(--orange)" opacity=".92"/>
+              <path id="lk-lens" d="M16 8.6a9 9 0 0 1 0 14.8a9 9 0 0 1 0-14.8z" fill="#111016"/>
+            </svg>
+            <div id="lk-word" style="font-size:136px;font-weight:500;letter-spacing:-.055em;line-height:1">Parallax</div>
+          </div>
+          <div id="lk-tag" class="light" style="font-size:40px;margin-top:30px;color:rgba(255,255,255,.8)">Research you can actually trust.</div>
+          <div id="lk-cta" class="btn light" style="margin-top:46px;height:66px;padding:0 34px;border-radius:33px;font-size:22px;gap:12px">Hire the team <span data-icon="arrow" data-size="22"></span></div>
+          <div id="lk-url" class="mono" style="margin-top:44px;font-size:18px;color:rgba(255,255,255,.6)">useparallax.xyz &nbsp;·&nbsp; traced with neatlogs &nbsp;·&nbsp; built with Entire &nbsp;·&nbsp; planned with cfo.ai</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <svg id="cursor" viewBox="0 0 34 34"><path d="M7 4.5 L7 26 L12.4 20.9 L16.3 29.2 L20.3 27.4 L16.5 19.4 L23.8 19.4 Z" fill="#111016" stroke="#fff" stroke-width="1.6" stroke-linejoin="round" /></svg>
+</div>
+
+<script src="reel.js"></script>
+<script src="score.js"></script>
+<script>
+const { sp, ease, clamp, mix, rgb } = Reel;
+const PALETTE = { canvas: '#e9e7f0', dot: '#cdc9dc', ink: '#111016', paper: '#ffffff', orange: '#d4612c', green: '#2b8a4a' };
+document.getElementById('grid').style.backgroundImage = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><circle cx='16' cy='16' r='1.1' fill='${PALETTE.dot}'/></svg>`)}")`;
+
+/* ---- the mark and the avatars (heads cropped from the agent sprites) ---- */
+document.querySelectorAll('.mark').forEach((el) => {
+  const s = +el.dataset.size;
+  el.innerHTML = `<svg width="${s}" height="${s}" viewBox="0 0 32 32" style="display:block"><circle cx="12" cy="16" r="9" fill="#2f56d6" opacity=".92"/><circle cx="20" cy="16" r="9" fill="#d4612c" opacity=".92"/><path d="M16 8.6a9 9 0 0 1 0 14.8a9 9 0 0 1 0-14.8z" fill="#111016"/></svg>`;
+});
+const HEAD = { lead: [0.46, 0.11], cfo: [0.5, 0.115], records: [0.44, 0.1], field: [0.5, 0.105], arbiter: [0.5, 0.125], verifier: [0.42, 0.115], writer: [0.5, 0.115] };
+document.querySelectorAll('.avatar').forEach((el) => {
+  const who = el.dataset.who, d = +el.dataset.size, H = d * 3.1, [hx, hy] = HEAD[who];
+  el.className = 'av';
+  el.style.width = el.style.height = d + 'px';
+  el.innerHTML = `<img src="agents/${who}-idle.webp" style="height:${H}px;top:${d * 0.52 - hy * H}px;transform:translateX(-${hx * 100}%)">`;
+});
+
+/* ---- static content ---- */
+const FACTS = [
+  ['Founded', '2020', '2020', 'ycombinator.com', 'agree'],
+  ['CEO', 'Paul Copplestone', 'Paul Copplestone', 'linkedin.com', 'agree'],
+  ['Headquarters', 'United States', 'San Francisco', 'ycombinator.com', 'conflict'],
+  ['Employees', '439', '120', 'ycombinator.com', 'conflict'],
+];
+document.getElementById('an-rows').innerHTML = FACTS.map(([f, a, b, src, v], i) => `
+  <div id="an-r${i}" class="row" style="position:relative;height:96px;border-bottom:1px solid var(--hair)">
+    <div data-hover-bg style="position:absolute;inset:8px -16px;border-radius:14px;background:rgba(17,16,22,.035);opacity:0"></div>
+    <div style="position:relative;width:190px;font-size:18px;color:var(--muted)">${f}</div>
+    <div id="an-a${i}" style="position:relative;width:330px;font-size:24px;letter-spacing:-.02em">${a}<div class="mono" style="font-size:11px;color:var(--muted);margin-top:4px">Crustdata</div></div>
+    <div id="an-b${i}" style="position:relative;width:330px;font-size:24px;letter-spacing:-.02em">${b}<div class="mono" style="font-size:11px;color:var(--muted);margin-top:4px">${src}</div></div>
+    <div style="position:relative;width:190px;display:flex;justify-content:flex-end"><span id="an-v${i}" class="chip ${v}">${v === 'agree' ? 'both agree' : 'conflict'}</span></div>
+  </div>`).join('');
+
+const CHECKS = [
+  ['Founded 2020', 'quote found on the page', 1],
+  ['CEO Paul Copplestone', 'quote found on the page', 1],
+  ['HQ San Francisco', 'quote found on the page', 1],
+  ['Employees 350+', 'settled by tiebreak', 1],
+  ['Total funding $1.19B', 'web quote missing, kept the database value', 0],
+];
+document.getElementById('vf-rows').innerHTML = CHECKS.map(([a, b, ok], i) => `
+  <div id="vf-r${i}" class="row" style="position:relative;height:48px;border-bottom:1px solid var(--hair)">
+    <div data-hover-bg style="position:absolute;inset:4px -14px;border-radius:10px;background:rgba(17,16,22,.035);opacity:0"></div>
+    <div style="position:relative;display:flex;align-items:center;gap:12px;font-size:17px"><span style="color:${ok ? 'var(--green)' : 'var(--amber)'}" data-icon="check" data-size="20" data-stroke="2.2"></span>${a}</div>
+    <div class="mono" style="position:relative;font-size:11.5px;color:var(--muted)">${b}</div>
+  </div>`).join('');
+
+const TREE = [
+  [0, 'Workflow', 'company-brief · job_mv3n76qpld7j', '1m 38s'],
+  [1, 'Agent', 'lead.intake', '1.5s'], [2, 'LLM', 'claude-haiku · 256 tok', '1.4s'],
+  [1, 'Agent', 'records', '0.6s'], [2, 'Tool', 'crustdata.company_enrich', '457ms'],
+  [1, 'Agent', 'field', '40.7s'], [2, 'Tool', 'crustdata.web_search', '3.8s'], [2, 'Tool', 'web.direct_fetch · free', '74ms'], [2, 'LLM', 'claude-haiku · 4,327 tok', '3.2s'],
+  [1, 'Agent', 'arbiter.tiebreak', '6.4s'], [2, 'LLM', 'claude-sonnet-4.6', '1.5s'],
+  [1, 'Agent', 'verifier · writer', '9.7s'],
+];
+document.getElementById('tr-tree').innerHTML = TREE.map(([d, k, n, t], i) => `
+  <div id="tr-r${i}" class="tr-row" style="padding-left:${d * 26}px">
+    <span class="kind mono" style="${k === 'Workflow' ? 'color:#fff;border-color:rgba(255,255,255,.3)' : k === 'Agent' ? 'color:#f0a27d;border-color:rgba(212,97,44,.4)' : ''}">${k}</span>
+    <span style="color:${d === 0 ? '#fff' : d === 1 ? 'rgba(255,255,255,.92)' : 'rgba(255,255,255,.66)'};${d === 0 ? 'font-weight:500' : ''}">${n}</span>
+    <span class="dur mono">${t}</span>
+  </div>`).join('');
+
+const STEPS = ['intake', 'resolve', 'records', 'field', 'pages', 'extract', 'arbiter', 'verify', 'write'];
+document.getElementById('rc-track').innerHTML =
+  `<div style="position:absolute;left:24px;right:24px;top:22px;height:2px;background:var(--hair)"></div>` +
+  `<div id="rc-line" style="position:absolute;left:24px;top:22px;height:2px;background:var(--green);width:0"></div>` +
+  STEPS.map((s, i) => `<div id="rc-s${i}" style="position:absolute;left:${24 + i * (836 / 8)}px;top:0;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:12px">
+     <div id="rc-d${i}" style="width:46px;height:46px;border-radius:23px;border:2px solid var(--hair);background:#fff;display:flex;align-items:center;justify-content:center;color:#fff"><span data-icon="check" data-size="22" data-stroke="2.4"></span></div>
+     <div class="mono" style="font-size:11px;color:var(--muted)">${s}</div></div>`).join('') +
+  `<div id="rc-crash" style="position:absolute;left:${24 + 5.5 * (836 / 8)}px;top:-18px;height:84px;border-left:2px dashed var(--red);opacity:0"><div class="mono" style="position:absolute;left:10px;top:-6px;font-size:11px;color:var(--red);white-space:nowrap">server restarted</div></div>`;
+
+Reel.hydrateIcons();
+Reel.odo(document.getElementById('qt-price'), '$0.00');
+Reel.odo(document.getElementById('vf-n'), '0');
+Reel.odo(document.getElementById('pf-v2'), '$0.00');
+
+const T1 = 'Supabase', T2 = 'Partnership call with their DevRel lead';
+const QUOTE = '“350+ team members across 40 countries”';
+const DONE = '7/7 verified · 98s · cost $0.165 · price $5';
+const typed = (s, lt, t0, cps) => s.slice(0, Math.max(0, Math.min(s.length, Math.floor((lt - t0) * cps))));
+const rise = (el, k, px = 12) => { el.style.opacity = k; el.style.translate = `0 ${(1 - k) * px}px`; };
+
+/* ---- the film: 68 s at 120 BPM = 34 bars ---- */
+const reel = Reel.define({
+  fps: 60, duration: 68, bpm: 120,
+  fills: { ink: PALETTE.ink, paper: PALETTE.paper, orange: PALETTE.orange, green: PALETTE.green },
+  cursorHome: [250, 150],
+  shadow: '0 0 0 1px rgba(17,16,22,.06), 0 2px 4px rgba(17,16,22,.05), 0 30px 70px -24px rgba(30,24,60,.32)',
+  states: [
+    { id: 'start', w: 340, h: 96, r: 48, fill: 'ink', zoom: 2.4, dur: 2.0, cursor: [['move', 0.4, [60, 10]]] },
+    { id: 'problem', w: 1600, h: 860, r: 44, fill: 'ink', zoom: 1.08, dur: 5.0,
+      cursor: [['move', 0.5, [120, 120]], ['move', 2.6, { sel: '#pb-n0', dx: 40 }], ['move', 3.2, { sel: '#pb-n1' }], ['move', 3.8, { sel: '#pb-n2', dx: 20 }], ['move', 4.3, [520, 260]]] },
+    { id: 'question', w: 1600, h: 860, r: 44, fill: 'paper', zoom: 1.08, dur: 4.0,
+      cursor: [['move', 0.4, [380, 120]], ['move', 1.3, { sel: '#qs-l2', dx: 380, dy: 40 }], ['move', 3.0, [420, 200]]] },
+    { id: 'hire', w: 620, h: 560, r: 28, fill: 'paper', zoom: 1.5, dur: 5.0,
+      cursor: [['move', 0.2, { sel: '#hr-f1', dx: 120 }], ['click', 0.6], ['move', 1.7, { sel: '#hr-f2', dx: 140 }], ['click', 2.0], ['move', 3.9, { sel: '#hr-btn', dx: 60, dy: 4 }]] },
+    { id: 'quote', w: 560, h: 440, r: 32, fill: 'ink', zoom: 1.95, dur: 4.0, advance: 'hold',
+      cursor: [['move', 0.4, [120, -60]], ['move', 1.3, { sel: '#qt-btn', dx: 40, dy: 4 }], ['hold', 1.95, 3.85]] },
+    { id: 'angles', w: 1240, h: 570, r: 32, fill: 'paper', zoom: 1.2, dur: 6.5,
+      cursor: [['move', 0.4, { sel: '#an-h1', dx: 60 }], ['move', 1.3, { sel: '#an-h2', dx: 60 }], ['move', 2.4, { sel: '#an-r0', dx: 120 }], ['move', 3.0, { sel: '#an-r1', dx: 160 }], ['move', 3.6, { sel: '#an-r2', dx: 200 }], ['move', 4.4, { sel: '#an-r3', dx: 260 }], ['move', 5.3, { sel: '#an-v3', dx: 6, dy: 2 }]] },
+    { id: 'arbiter', w: 860, h: 410, r: 32, fill: 'ink', zoom: 1.74, dur: 5.5,
+      cursor: [['move', 0.4, [-60, -40]], ['move', 1.6, { sel: '#ab-src', dx: -120 }], ['move', 4.3, { sel: '#ab-ok', dx: 4, dy: 3 }]] },
+    { id: 'verify', w: 720, h: 560, r: 30, fill: 'paper', zoom: 1.55, dur: 5.0,
+      cursor: [['move', 0.4, { sel: '#vf-r0', dx: 140 }], ['move', 1.0, { sel: '#vf-r2', dx: 160 }], ['move', 1.6, { sel: '#vf-r4', dx: 180 }], ['move', 2.6, { sel: '#vf-wr', dx: 200 }], ['move', 3.8, { sel: '#vf-btn', dx: 60, dy: 4 }]] },
+    { id: 'done', w: 880, h: 112, r: 56, fill: 'green', zoom: 1.7, dur: 3.0, cursor: [['move', 0.4, [300, 14]], ['move', 1.8, [340, 8]]] },
+    { id: 'trace', w: 1200, h: 610, r: 32, fill: 'ink', zoom: 1.25, dur: 6.0,
+      cursor: [['move', 0.4, { sel: '#tr-r0', dx: 120 }], ['move', 1.4, { sel: '#tr-r5', dx: 160 }], ['move', 2.4, { sel: '#tr-r9', dx: 180 }], ['move', 3.6, { sel: '#tr-det', dx: 60 }], ['move', 5.0, { sel: '#tr-det', dx: 90, dy: 6 }]] },
+    { id: 'recover', w: 980, h: 420, r: 30, fill: 'paper', zoom: 1.55, dur: 4.0,
+      cursor: [['move', 0.4, { sel: '#rc-s2', dy: 40 }], ['move', 1.4, { sel: '#rc-crash', dx: 30, dy: 50 }], ['move', 2.6, { sel: '#rc-s8', dy: 40 }], ['move', 3.3, { sel: '#rc-msg', dx: 120 }]] },
+    { id: 'proof', w: 1500, h: 520, r: 40, fill: 'ink', zoom: 1.05, dur: 6.0,
+      cursor: [['move', 0.4, { sel: '#pf-0', dx: 40 }], ['move', 1.8, { sel: '#pf-1', dx: 40 }], ['move', 3.2, { sel: '#pf-2', dx: 40 }], ['move', 5.0, [560, 200]]] },
+    { id: 'manifesto', w: 1600, h: 860, r: 44, fill: 'paper', zoom: 1.08, dur: 4.0,
+      cursor: [['move', 0.4, [480, 260]], ['move', 2.6, { sel: '#mf-2', dx: 330, dy: 40 }]] },
+    { id: 'lockup', w: 1600, h: 860, r: 44, fill: 'ink', zoom: 1.08, dur: 6.0,
+      cursor: [['move', 0.6, [380, 230]], ['move', 3.6, { sel: '#lk-cta', dx: 50, dy: 6 }]] },
+    { id: 'end', content: 'start', w: 340, h: 96, r: 48, fill: 'ink', zoom: 2.4, dur: null, cursor: [['move', 0.3, [250, 150]]] },
+  ],
+  hover: ['#hr-btn', '#qt-btn', '#an-r0', '#an-r1', '#an-r2', '#an-r3', '#an-v3', '#ab-ok', '#vf-r0', '#vf-r1', '#vf-r2', '#vf-r3', '#vf-r4', '#vf-btn', '#lk-cta'],
+  press: ['#hr-f1', '#hr-f2'],
+  channels: {
+    hold: { init: 0, w: 9, target: (a) => (a.state === 'quote' ? a.holdProgress('quote') : null) },
+  },
+  update: {
+    problem(lt, S, h) {
+      rise(h.el('pb-l1'), sp(lt - 0.3, 14, 1), 16);
+      h.el('pb-strike').style.width = ease(clamp((lt - 1.5) / 0.55)) * 104 + '%';
+      rise(h.el('pb-l2'), sp(lt - 2.0, 14, 1), 16);
+      for (let i = 0; i < 3; i++) rise(h.el('pb-n' + i), sp(lt - 2.6 - i * 0.18, 15, 0.9), 10);
+    },
+    question(lt, S, h) {
+      rise(h.el('qs-l1'), sp(lt - 0.2, 14, 1), 16);
+      rise(h.el('qs-l2'), sp(lt - 0.5, 14, 1), 16);
+      h.el('qs-under').style.width = ease(clamp((lt - 1.4) / 0.6)) * 104 + '%';
+    },
+    hire(lt, S, h) {
+      h.el('hr-t1').textContent = typed(T1, lt, 0.7, 11);
+      h.el('hr-t2').textContent = typed(T2, lt, 2.1, 24);
+      h.el('hr-c1').style.opacity = lt < 1.7 ? (lt < 1.5 || Math.floor(lt * 2.5) % 2 ? 1 : 0) : 0;
+      h.el('hr-c2').style.opacity = lt > 1.95 ? (lt < 3.8 || Math.floor(lt * 2.5) % 2 ? 1 : 0) : 0;
+      h.el('hr-f1').style.borderColor = lt < 1.75 ? '#111016' : '';
+      h.el('hr-f2').style.borderColor = lt > 1.95 ? '#111016' : '';
+      rise(h.el('hr-btn'), sp(lt - 0.4, 15, 0.86), 14);
+    },
+    quote(lt, S, h) {
+      h.setOdo(h.el('qt-price'), 5 * ease(clamp((lt - 0.3) / 1.0)), 2, 96);
+      h.el('qt-arc').style.strokeDashoffset = 1 - S.hold;
+      h.el('qt-lbl').textContent = S.hold > 0.97 ? 'Hired' : 'Hold to hire the team';
+    },
+    angles(lt, S, h) {
+      for (let i = 0; i < 4; i++) {
+        rise(h.el('an-a' + i), sp(lt - 0.5 - i * 0.16, 15, 0.9), 10);
+        rise(h.el('an-b' + i), sp(lt - 1.4 - i * 0.16, 15, 0.9), 10);
+        const kv = sp(lt - 2.3 - i * 0.2, 17, 0.84), v = h.el('an-v' + i);
+        v.style.opacity = kv; v.style.scale = 0.85 + 0.15 * kv;
+      }
+    },
+    arbiter(lt, S, h) {
+      h.el('ab-s1').style.width = ease(clamp((lt - 3.0) / 0.4)) * 108 + '%';
+      h.el('ab-s2').style.width = ease(clamp((lt - 3.2) / 0.4)) * 108 + '%';
+      rise(h.el('ab-src'), sp(lt - 0.9, 15, 1), 12);
+      h.el('ab-q').textContent = typed(QUOTE, lt, 1.4, 26);
+      rise(h.el('ab-res'), sp(lt - 3.4, 15, 0.86), 14);
+      const ko = sp(lt - 3.0, 17, 0.84); h.el('ab-ok').style.opacity = ko;
+    },
+    verify(lt, S, h) {
+      for (let i = 0; i < CHECKS.length; i++) rise(h.el('vf-r' + i), sp(lt - 0.3 - i * 0.16, 15, 0.9), 10);
+      h.setOdo(h.el('vf-n'), Math.round(7 * ease(clamp((lt - 0.4) / 1.3))), 0, 44);
+      rise(h.el('vf-wr'), sp(lt - 2.2, 15, 0.9), 10);
+      rise(h.el('vf-btn'), sp(lt - 1.0, 15, 0.86), 14);
+    },
+    done(lt, S, h) { h.el('dn-meta').textContent = typed(DONE, lt, 0.35, 36); },
+    trace(lt, S, h) {
+      for (let i = 0; i < TREE.length; i++) {
+        const k = sp(lt - 0.25 - i * 0.12, 16, 1), r = h.el('tr-r' + i);
+        r.style.opacity = k; r.style.clipPath = `inset(0 ${(1 - ease(clamp((lt - 0.25 - i * 0.12) / 0.35))) * 100}% 0 0)`;
+      }
+      rise(h.el('tr-det'), sp(lt - 2.6, 15, 0.86), 14);
+    },
+    recover(lt, S, h) {
+      const kept = clamp((lt - 0.2) / 1.1) * 6;
+      const resumed = lt > 2.0 ? 6 + clamp((lt - 2.0) / 1.0) * 3 : Math.min(kept, 6);
+      for (let i = 0; i < 9; i++) {
+        const on = clamp(resumed - i), d = h.el('rc-d' + i);
+        d.style.background = rgb(mix([255, 255, 255], i < 6 ? [43, 138, 74] : [212, 97, 44], on));
+        d.style.borderColor = on > 0.5 ? 'transparent' : '';
+        d.style.scale = 0.9 + 0.1 * sp(lt - 0.2 - i * 0.15, 16, 0.8);
+      }
+      h.el('rc-line').style.width = clamp(resumed / 8) * 836 + 'px';
+      const kc = sp(lt - 1.35, 16, 1); h.el('rc-crash').style.opacity = kc * (lt < 3.2 ? 1 : 1 - clamp((lt - 3.2) / 0.4) * 0.6);
+      rise(h.el('rc-msg'), sp(lt - 2.3, 15, 1), 10);
+    },
+    proof(lt, S, h) {
+      for (let i = 0; i < 3; i++) rise(h.el('pf-' + i), sp(lt - 0.3 - i * 1.3, 14, 0.95), 18);
+      h.el('pf-v0').textContent = Math.round(14 * ease(clamp((lt - 0.4) / 1.0))) + '/14';
+      h.el('pf-v1').textContent = Math.round(39 * (1 - ease(clamp((lt - 1.8) / 1.0)))) + '%';
+      h.setOdo(h.el('pf-v2'), 0.12 - 0.05 * ease(clamp((lt - 3.1) / 1.0)), 2, 118);
+    },
+    manifesto(lt, S, h) {
+      for (let i = 0; i < 3; i++) {
+        const el = h.el('mf-' + i), k = sp(lt - 0.2 - i * 0.75, 14, 1);
+        const dim = i < 2 ? 1 - 0.62 * clamp((lt - 0.95 - i * 0.75) / 0.4) : 1;
+        el.style.opacity = k * dim; el.style.translate = `0 ${(1 - k) * 16}px`;
+      }
+      h.el('mf-under').style.width = ease(clamp((lt - 2.2) / 0.55)) * 104 + '%';
+    },
+    lockup(lt, S, h) {
+      const km = sp(lt - 0.25, 9, 1);
+      h.el('lk-c1').setAttribute('cx', 12 - 7 * (1 - km)); h.el('lk-c2').setAttribute('cx', 20 + 7 * (1 - km));
+      h.el('lk-lens').style.opacity = clamp((km - 0.75) * 4);
+      rise(h.el('lk-word'), sp(lt - 0.6, 14, 1), 16);
+      rise(h.el('lk-tag'), sp(lt - 1.2, 14, 1), 12);
+      rise(h.el('lk-cta'), sp(lt - 1.8, 15, 0.86), 14);
+      rise(h.el('lk-url'), sp(lt - 2.3, 14, 1), 8);
+    },
+  },
+  score: {
+    prog: ['Am', 'F', 'C', 'G', 'Am', 'F', 'C', 'G', 'F', 'G', 'Em', 'Am', 'F', 'G', 'Em', 'Am', 'F', 'G', 'C', 'C',
+           'F', 'G', 'Em', 'Am', 'F', 'G', 'C', 'G', 'F', 'G', 'C', 'C', 'Am', 'Am'],
+    hits: [{ state: 'done', boom: 0.5, motif: [72, 76, 79] }, { state: 'lockup', boom: 0.55, motif: [72, 76, 79, 84] }],
+    breaks: [['recover', 'proof']],
+  },
+  sfx(au, r) {
+    au.typing(r.at('hire') + 0.7, r.at('hire') + 0.7 + T1.length / 11, T1);
+    au.typing(r.at('hire') + 2.1, r.at('hire') + 2.1 + T2.length / 24, T2);
+    au.typing(r.at('arbiter') + 1.4, r.at('arbiter') + 1.4 + QUOTE.length / 26, QUOTE);
+    au.counter(r.at('quote') + 0.3, r.at('quote') + 1.3, 12);
+    au.counter(r.at('verify') + 0.4, r.at('verify') + 1.7, 7);
+    au.counter(r.at('proof') + 0.4, r.at('proof') + 4.1, 18);
+    au.swipe(r.at('problem') + 1.5, 0.05);
+    for (let i = 0; i < 2; i++) au.swipe(r.at('arbiter') + 3.0 + i * 0.2, 0.05);
+    au.tick(r.at('recover') + 1.35, 520, 0.08, 0.06);
+    for (let i = 0; i < 4; i++) au.tick(r.at('angles') + 2.3 + i * 0.2, 2600 + i * 200, 0.04, 0.03);
+  },
+});
+</script>
+</body>
+</html>

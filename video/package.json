@@ -1,0 +1,1 @@
+{"name":"motion-reel","private":true,"type":"module","scripts":{"stills":"node render.mjs --stills 0,2,4,6,8","audio":"node render.mjs --audio","render":"node render.mjs --audio && node render.mjs --mp4 --with-audio","qa":"node qa.mjs --transitions"},"dependencies":{"@ffmpeg-installer/ffmpeg":"^1.1.0","puppeteer-core":"^23.11.1"}}
