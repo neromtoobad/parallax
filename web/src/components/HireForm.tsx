@@ -20,7 +20,9 @@ export function HireForm({ id }: { id: string }) {
     setBusy(true);
     setErr('');
     try {
-      setQuoted(await api<JobView>('/quote', { method: 'POST', body: JSON.stringify({ service: s.id, input: form }) }));
+      // ?tag=demo (or any tag) marks test and demo runs, so the books keep them apart from client revenue.
+      const tag = new URLSearchParams(window.location.search).get('tag') || undefined;
+      setQuoted(await api<JobView>('/quote', { method: 'POST', body: JSON.stringify({ service: s.id, input: form, tag }) }));
     } catch (x) {
       setErr((x as Error).message);
     } finally {
