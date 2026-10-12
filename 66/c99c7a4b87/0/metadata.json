@@ -1,0 +1,118 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "66c99c7a4b87",
+  "session_id": "8f2142b3-1af9-4c14-8c72-e64f988a23f4",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-12T11:33:37.525247Z",
+  "branch": "main",
+  "checkpoints_count": 3,
+  "save_step_count": 2,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-opus-5-5",
+  "turn_id": "cdd5f3a17eac",
+  "checkpoint_transcript_start": 2479,
+  "transcript_lines_at_start": 2479,
+  "compact_transcript_start": 414,
+  "token_usage": {
+    "input_tokens": 96,
+    "cache_creation_tokens": 699703,
+    "cache_read_tokens": 28378014,
+    "output_tokens": 42322,
+    "api_call_count": 47
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_014H3waF4HtGswW3q91beB5H",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "entire"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "d64f9f782173",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 624,
+        "end": 625,
+        "entry_ids": [
+          "b499f035-d3c5-4f53-b11e-8fabe431fa46"
+        ],
+        "tool_use_id": "toolu_014H3waF4HtGswW3q91beB5H"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_014H3waF4HtGswW3q91beB5H"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: entire",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Tsvrk7wntH6bpHsZXgYPwk",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "ui-motion-reel"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "9375b2afa4eb",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 2139,
+        "end": 2140,
+        "entry_ids": [
+          "ce65077a-a3dc-4ec7-8376-0569747d7d90"
+        ],
+        "tool_use_id": "toolu_01Tsvrk7wntH6bpHsZXgYPwk"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Tsvrk7wntH6bpHsZXgYPwk"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: ui-motion-reel",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 48
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 431,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 1,
+      "user_lines_removed": 0,
+      "agent_lines_added": 431,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "video/promo.html": 1
+      }
+    }
+  ]
+}
