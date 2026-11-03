@@ -1,0 +1,28 @@
+{
+  "network": "testnet",
+  "rpc": "https://near-testnet.drpc.org",
+  "rpcFallbacks": [
+    "https://test.rpc.fastnear.com",
+    "https://rpc.testnet.near.org"
+  ],
+  "explorer": "https://testnet.nearblocks.io",
+  "owner": "parallax.testnet",
+  "bank": "bank.parallax.testnet",
+  "usdc": "usdc.parallax.testnet",
+  "usdcFaucet": true,
+  "cfo": "cfo.parallax.testnet",
+  "contributors": "contributors.parallax.testnet",
+  "team": {
+    "scout": "scout.team.parallax.testnet",
+    "researcher": "researcher.team.parallax.testnet",
+    "writer": "writer.team.parallax.testnet",
+    "illustrator": "illustrator.team.parallax.testnet",
+    "reader": "reader.team.parallax.testnet",
+    "analyst": "analyst.team.parallax.testnet",
+    "messenger": "messenger.team.parallax.testnet",
+    "auditor": "auditor.team.parallax.testnet",
+    "producer": "producer.team.parallax.testnet",
+    "investigator": "investigator.team.parallax.testnet"
+  },
+  "compute": "compute.parallax.testnet"
+}

@@ -39,7 +39,8 @@ CONTRIB=contributors.$ROOT
 COMPUTE=compute.$ROOT
 AGENTS=("${ROLES[@]/%/.$TEAM}" "${SECOND_ROLES[@]/%/-2.$TEAM}")
 # NEAR each new account starts with: the bank's covers its code (~330 KB) and state; an agent's pays its bid gas.
-FUND_BANK=4.5 FUND_CFO=0.5 FUND_SMALL=0.1 FUND_AGENT=0.15
+# Override with FUND_BANK, FUND_CFO, FUND_SMALL, FUND_AGENT and FUND_USDC (testnet root from the faucet has 10 NEAR).
+FUND_BANK=${FUND_BANK:-4.5} FUND_CFO=${FUND_CFO:-0.5} FUND_SMALL=${FUND_SMALL:-0.1} FUND_AGENT=${FUND_AGENT:-0.15}
 # team.$ROOT pays for the agents it creates, so it starts with their NEAR plus its own
 FUND_TEAM=$(python3 -c "print(round(${#AGENTS[@]}*$FUND_AGENT+0.2,2))")
 
@@ -93,7 +94,7 @@ call1() { # call <contract> <method> <json> <signer> [deposit]
 
 if [ "$NET" = testnet ] && [ "$USDC" = "usdc.$ROOT" ] && ! exists "$USDC"; then
   (cd ../near-usdc && cargo near build non-reproducible-wasm >/dev/null)
-  sub "$USDC" "$ROOT" 2
+  sub "$USDC" "$ROOT" ${FUND_USDC:-2}
   near contract deploy "$USDC" use-file ../near-usdc/target/near/parallax_test_usdc.wasm \
     with-init-call new json-args '{}' prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' \
     $NETCFG sign-with-legacy-keychain send >/dev/null
