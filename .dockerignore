@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+server/data
+server/data-demo
+contracts
+design
+assets
+.git
+*.log
+.env
+.env.*

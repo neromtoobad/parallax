@@ -49,11 +49,31 @@ app.post('/api/orders', async (c) => {
     return c.json(view_(o));
   } catch (e: any) { return c.json({ error: String(e?.message ?? e) }, 400); }
 });
+// The demo wallet pays for the visitor, and every paid job runs model calls, so the demo wallet takes a few
+// jobs a day per visitor and a cap for the whole site (PARALLAX_DAY_PER_IP, PARALLAX_DAY_TOTAL).
+const PER_IP = Number(process.env.PARALLAX_DAY_PER_IP ?? (DRY ? 20 : 4));
+const TOTAL = Number(process.env.PARALLAX_DAY_TOTAL ?? (DRY ? 300 : 40));
+const paidToday = { day: '', total: 0, byIp: new Map<string, number>() };
+function allowPaid(ip: string): string | null {
+  const day = new Date().toISOString().slice(0, 10);
+  if (paidToday.day !== day) Object.assign(paidToday, { day, total: 0, byIp: new Map() });
+  if (paidToday.total >= TOTAL) return 'The demo wallet has paid for all the jobs it can today. Try again tomorrow.';
+  if ((paidToday.byIp.get(ip) ?? 0) >= PER_IP) return `The demo wallet pays for ${PER_IP} jobs a day per visitor. Try again tomorrow.`;
+  paidToday.total++;
+  paidToday.byIp.set(ip, (paidToday.byIp.get(ip) ?? 0) + 1);
+  return null;
+}
 app.post('/api/orders/:id/pay', async (c) => {
   const o = getOrder(c.req.param('id'));
   if (!o) return c.json({ error: 'not found' }, 404);
   const b = await c.req.json().catch(() => ({}));
-  try { return c.json(view_(await fund(o, b.wallet !== 'own'))); } catch (e: any) { return c.json({ error: String(e?.message ?? e) }, 400); }
+  const demoWallet = b.wallet !== 'own';
+  if (demoWallet && o.state === 'quoted') {
+    const ip = (c.req.header('x-forwarded-for') ?? '').split(',')[0].trim() || 'local';
+    const no = allowPaid(ip);
+    if (no) return c.json({ error: no }, 429);
+  }
+  try { return c.json(view_(await fund(o, demoWallet))); } catch (e: any) { return c.json({ error: String(e?.message ?? e) }, 400); }
 });
 app.post('/api/orders/:id/accept', async (c) => {
   const o = getOrder(c.req.param('id'));
