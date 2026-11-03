@@ -221,6 +221,6 @@ NEAR (near-sdk, near-api-js, near-cli-rs, cargo-near), NEAR AI Cloud (DeepSeek V
 
 ## Hackathon scope
 
-Built from scratch for NEAR HACKATHON, Nov 2026. The name Parallax was used before for an earlier, unrelated hackathon project; this one shares no code with it.
+Built from scratch for NEAR HACKATHON, Nov 2026.
 
 MIT licensed.
