@@ -1,28 +1,26 @@
 # Cut each agent's pose sheets into one sprite strip for the workroom: the background keyed out, every pose turned
 # to face right, scaled alike, feet on the bottom edge. design/sheets/<name>.webp is a 4x2 grid of standing poses
-# (its fourth pose, typing seen from behind, is no longer used); <name>-seat.webp has two poses seated facing out,
-# laptop on the knees: typing, and looking up.
+# (its walks and its fourth pose, typing seen from behind, are no longer used); <name>-walk.webp is a 1x4 walk cycle
+# seen side on (contact, passing, other contact, passing); <name>-seat.webp has two poses seated facing out, laptop
+# on the knees: typing, and looking up.
 #   <python with numpy, scipy, pillow> design/scripts/poses.py [name ...]
-# Frame order in the strip: idle, walkA, walkB, type, cheer, bid, box, coin, look.
+# Frame order in the strip: idle, walk1-4, type, cheer, bid, box, coin, look.
 import glob, os, sys
 import numpy as np
 from PIL import Image
 from scipy import ndimage
 
 SRC, OUT = 'design/sheets', 'web/public/agents/poses'
-FRAMES = ['idle', 'walkA', 'walkB', 'type', 'cheer', 'bid', 'box', 'coin', 'look']
+FRAMES = ['idle', 'walk1', 'walk2', 'walk3', 'walk4', 'type', 'cheer', 'bid', 'box', 'coin', 'look']
 STAND = 200            # standing height in the strip, px
+WALK = 198             # height of the tallest walk pose (passing, one leg straight)
 SEATED = 156           # seated height (stool to hair), px
 CELL = (150, 250)      # one frame, px; feet sit 4 px above the bottom
 # Which way each pose faces on the sheet. The prompt asked for walks and the box facing right and the rest in a
 # three-quarter turn to the left, but a few sheets came out otherwise.
-FACE = {f: 'L' for f in ('idle', 'bid', 'coin')} | {f: 'R' for f in ('walkA', 'walkB', 'box')} | {'type': '-', 'cheer': '-', 'look': '-'}
+FACE = {f: 'L' for f in ('idle', 'bid', 'coin')} | {f: 'R' for f in ('walk1', 'walk2', 'walk3', 'walk4', 'box')} | {'type': '-', 'cheer': '-', 'look': '-'}
 ODD = {
-    'pip': {'walkA': 'L'},
-    'bram': {'walkB': 'L'},
-    'sol': {'walkB': 'L', 'coin': 'R'},
-    'hedda': {'walkB': 'L'},
-    'ansel': {'walkB': 'L'},
+    'sol': {'coin': 'R'},
     'kit': {'coin': 'R'},
 }
 # Lux's white coat is shaded in nearly the sheet's grey, so only the edge-connected background is keyed there.
@@ -94,12 +92,14 @@ def anchor_x(alpha):
 
 def build(name):
     stand = frames_of(f'{SRC}/{name}.webp', name, 2, 4)
+    walk = frames_of(f'{SRC}/{name}-walk.webp', name, 1, 4)
     seat = frames_of(f'{SRC}/{name}-seat.webp', name, 1, 2)
-    fr = stand[:3] + [seat[0]] + stand[4:] + [seat[1]]
+    fr = stand[:1] + walk + [seat[0]] + stand[4:] + [seat[1]]
+    tall = max(w.shape[0] for w in walk)
     face = FACE | ODD.get(name, {})
     strip = Image.new('RGBA', (CELL[0] * len(FRAMES), CELL[1]), (0, 0, 0, 0))
     for i, (f, px) in enumerate(zip(FRAMES, fr)):
-        scale = (SEATED / seat[0].shape[0]) if f in ('type', 'look') else (STAND / stand[0].shape[0])
+        scale = (SEATED / seat[0].shape[0]) if f in ('type', 'look') else (WALK / tall) if f.startswith('walk') else (STAND / stand[0].shape[0])
         im = Image.fromarray(px)
         if face[f] == 'L':
             im = im.transpose(Image.FLIP_LEFT_RIGHT)
@@ -114,9 +114,10 @@ def build(name):
         strip.alpha_composite(cell, (i * CELL[0], 0))
     strip.save(f'{OUT}/{name}.webp', quality=88, method=6)
     strip.save(f'/private/tmp/claude-501/-Users-mac-Documents-Hacks/6cdfbe4f-1f4d-4f3a-b078-f15dbb904db3/scratchpad/strip-{name}.png')
-    print(name, os.path.getsize(f'{OUT}/{name}.webp') // 1024, 'KB', [p.shape[:2] for p in fr])
+    feet = [int(np.ptp(np.nonzero(w[-max(4, w.shape[0] // 25):, :, 3].any(axis=0))[0]) * WALK / tall) for w in walk[::2]]
+    print(name, os.path.getsize(f'{OUT}/{name}.webp') // 1024, 'KB', 'contact feet span', feet)
 
 
-names = sys.argv[1:] or sorted(os.path.basename(f)[:-5] for f in glob.glob(f'{SRC}/*.webp') if not f.endswith('-seat.webp'))
+names = sys.argv[1:] or sorted(os.path.basename(f)[:-5] for f in glob.glob(f'{SRC}/*.webp') if '-' not in os.path.basename(f))
 for n in names:
     build(n)

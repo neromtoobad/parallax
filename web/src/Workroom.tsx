@@ -27,8 +27,11 @@ const name = (id?: string) => (id ? NAMES[id] ?? id.replace(/^outside:/, '') : '
 const W = 1115, H = 1102;
 const FLOOR = [430, 740, 1040]; // the line the feet walk on: hall, desks, street
 const STAIR = 992;              // the stairwell on the right joins all three floors
-const SPEED = 250;              // walking speed, px per second, the same for every walk
-const STRIDE = 44;              // px walked per step
+const SPEED = 150;              // walking speed, px per second, the same for every walk
+// One step (heel to heel) in the walk sheets is about 65 px of a 200 px figure, 40 px here; the cycle is four
+// frames over two steps, so each frame is held for half a step and the planted foot keeps still on the floor.
+const STEP = 40;
+const WALK = ['walk1', 'walk2', 'walk3', 'walk4'] as const;
 const BOARD = 557;              // the middle of the auction board; people in the hall turn to it
 const COUNTER = { x: 440, y: 996, past: 652 }; // behind the counter, and the gap at its right end
 const HALL = [470, 640, 390, 720, 310, 800, 230, 880];
@@ -50,7 +53,7 @@ const SEATS: Record<string, { row: Row; x: number }> = {
 };
 // Frames in each strip (web/public/agents/poses/<name>.webp, made by design/scripts/poses.py), all facing right;
 // 'type' and 'look' are seated, facing out.
-const FRAMES = ['idle', 'walkA', 'walkB', 'type', 'cheer', 'bid', 'box', 'coin', 'look'] as const;
+const FRAMES = ['idle', ...WALK, 'type', 'cheer', 'bid', 'box', 'coin', 'look'] as const;
 type Pose = 'idle' | 'bid' | 'cheer' | 'box' | 'coin';
 const cq = (px: number) => `${(px / W) * 100}cqw`;
 
@@ -301,9 +304,11 @@ class Crowd {
     const moving = b.path.length > 0;
     let frame: (typeof FRAMES)[number] = 'idle', lift = 0;
     if (moving) {
-      const phase = b.walked / STRIDE;
-      frame = b.pose === 'box' ? 'box' : Math.floor(phase) % 2 ? 'walkB' : 'walkA';
-      lift = Math.abs(Math.sin(phase * Math.PI)) * 3.2;
+      // The passing frames stand taller than the contact ones, so the head already rises and falls with each step;
+      // the box has a single carrying pose and gets a small bob instead.
+      const phase = b.walked / STEP;
+      if (b.pose === 'box') { frame = 'box'; lift = Math.abs(Math.sin(phase * Math.PI)) * 2.4; }
+      else frame = WALK[Math.floor(phase * 2 + 0.5) % 4];
     } else if (b.seated) {
       // At work: head down typing, looking up now and then; while talking, mostly looking out.
       // Someone being paid looks up at the coin.
