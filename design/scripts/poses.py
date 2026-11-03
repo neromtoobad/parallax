@@ -1,19 +1,22 @@
-# Cut each agent's pose sheet (design/sheets/<name>.webp, a 4x2 grid on flat grey) into one sprite strip for the
-# workroom: the background keyed out, every pose turned to face right, scaled alike, feet on the bottom edge.
+# Cut each agent's pose sheets into one sprite strip for the workroom: the background keyed out, every pose turned
+# to face right, scaled alike, feet on the bottom edge. design/sheets/<name>.webp is a 4x2 grid of standing poses
+# (its fourth pose, typing seen from behind, is no longer used); <name>-seat.webp has two poses seated facing out,
+# laptop on the knees: typing, and looking up.
 #   <python with numpy, scipy, pillow> design/scripts/poses.py [name ...]
-# Frame order in the strip: idle, walkA, walkB, type, cheer, bid, box, coin.
+# Frame order in the strip: idle, walkA, walkB, type, cheer, bid, box, coin, look.
 import glob, os, sys
 import numpy as np
 from PIL import Image
 from scipy import ndimage
 
 SRC, OUT = 'design/sheets', 'web/public/agents/poses'
-FRAMES = ['idle', 'walkA', 'walkB', 'type', 'cheer', 'bid', 'box', 'coin']
+FRAMES = ['idle', 'walkA', 'walkB', 'type', 'cheer', 'bid', 'box', 'coin', 'look']
 STAND = 200            # standing height in the strip, px
+SEATED = 156           # seated height (stool to hair), px
 CELL = (150, 250)      # one frame, px; feet sit 4 px above the bottom
 # Which way each pose faces on the sheet. The prompt asked for walks and the box facing right and the rest in a
 # three-quarter turn to the left, but a few sheets came out otherwise.
-FACE = {f: 'L' for f in ('idle', 'bid', 'coin')} | {f: 'R' for f in ('walkA', 'walkB', 'box')} | {'type': '-', 'cheer': '-'}
+FACE = {f: 'L' for f in ('idle', 'bid', 'coin')} | {f: 'R' for f in ('walkA', 'walkB', 'box')} | {'type': '-', 'cheer': '-', 'look': '-'}
 ODD = {
     'pip': {'walkA': 'L'},
     'bram': {'walkB': 'L'},
@@ -64,14 +67,14 @@ def cut(profile, parts, lo, hi):
     return [0] + out + [n]
 
 
-def frames_of(name):
-    a, fg = key(Image.open(f'{SRC}/{name}.webp'), POCKETS.get(name, 6), NEAR.get(name, 14))
-    rows = cut(fg.sum(axis=1), 2, 0, fg.shape[0])
+def frames_of(path, name, nrows, ncols):
+    a, fg = key(Image.open(path), POCKETS.get(name, 6), NEAR.get(name, 14))
+    rows = cut(fg.sum(axis=1), nrows, 0, fg.shape[0])
     found = []
-    for r in range(2):
+    for r in range(nrows):
         y0, y1 = rows[r], rows[r + 1]
-        cols = cut(fg[y0:y1].sum(axis=0), 4, 0, fg.shape[1])
-        for c in range(4):
+        cols = cut(fg[y0:y1].sum(axis=0), ncols, 0, fg.shape[1])
+        for c in range(ncols):
             x0, x1 = cols[c], cols[c + 1]
             m = fg[y0:y1, x0:x1]
             ys, xs = np.nonzero(m)
@@ -90,11 +93,13 @@ def anchor_x(alpha):
 
 
 def build(name):
-    fr = frames_of(name)
+    stand = frames_of(f'{SRC}/{name}.webp', name, 2, 4)
+    seat = frames_of(f'{SRC}/{name}-seat.webp', name, 1, 2)
+    fr = stand[:3] + [seat[0]] + stand[4:] + [seat[1]]
     face = FACE | ODD.get(name, {})
-    scale = STAND / fr[0].shape[0]
     strip = Image.new('RGBA', (CELL[0] * len(FRAMES), CELL[1]), (0, 0, 0, 0))
     for i, (f, px) in enumerate(zip(FRAMES, fr)):
+        scale = (SEATED / seat[0].shape[0]) if f in ('type', 'look') else (STAND / stand[0].shape[0])
         im = Image.fromarray(px)
         if face[f] == 'L':
             im = im.transpose(Image.FLIP_LEFT_RIGHT)
@@ -112,6 +117,6 @@ def build(name):
     print(name, os.path.getsize(f'{OUT}/{name}.webp') // 1024, 'KB', [p.shape[:2] for p in fr])
 
 
-names = sys.argv[1:] or sorted(os.path.basename(f)[:-5] for f in glob.glob(f'{SRC}/*.webp'))
+names = sys.argv[1:] or sorted(os.path.basename(f)[:-5] for f in glob.glob(f'{SRC}/*.webp') if not f.endswith('-seat.webp'))
 for n in names:
     build(n)

@@ -25,23 +25,32 @@ const name = (id?: string) => (id ? NAMES[id] ?? id.replace(/^outside:/, '') : '
 
 // The stage picture is 1115 x 1102; everything below is in its pixels.
 const W = 1115, H = 1102;
-const FLOOR = [430, 733, 1040]; // the line the feet walk on: hall, desks, street
+const FLOOR = [430, 740, 1040]; // the line the feet walk on: hall, desks, street
 const STAIR = 992;              // the stairwell on the right joins all three floors
 const SPEED = 250;              // walking speed, px per second, the same for every walk
 const STRIDE = 44;              // px walked per step
-const SEAT = 702;               // where a seated agent's sprite stands, behind the chair back
 const BOARD = 557;              // the middle of the auction board; people in the hall turn to it
 const COUNTER = { x: 440, y: 996, past: 652 }; // behind the counter, and the gap at its right end
 const HALL = [470, 640, 390, 720, 310, 800, 230, 880];
-// Nine chairs; the rest of the team works standing.
-const CHAIRS = [190, 267, 350, 430, 507, 585, 662, 772, 855];
-const SITS = ['scout', 'researcher', 'researcher-2', 'reader', 'writer', 'writer-2', 'analyst', 'illustrator', 'illustrator-2'];
-const STANDS: Record<string, { x: number; floor: number }> = {
-  auditor: { x: 70, floor: 1 }, 'auditor-2': { x: 124, floor: 1 }, messenger: { x: 922, floor: 1 },
-  producer: { x: 252, floor: 2 }, investigator: { x: 818, floor: 2 },
+// The whole team sits facing out behind two long desks, a raised back row of eight and a front row of six. Each
+// desk front is its own layer (design/scripts/desks.py), drawn over the row seated behind it. People walk along
+// behind their desk at `walk`, step out past its right end at `exit`, and a seated sprite stands at `sit` so the
+// laptop on its knees rests on the desk top.
+type Row = 'back' | 'front';
+const ROWS: Record<Row, { walk: number; sit: number; top: number; exit: number; z: number }> = {
+  back: { walk: 694, sit: 682, top: 630, exit: 932, z: 1 },
+  front: { walk: 722, sit: 710, top: 658, exit: 872, z: 3 },
 };
-// Frames in each strip (web/public/agents/poses/<name>.webp, made by design/scripts/poses.py), all facing right.
-const FRAMES = ['idle', 'walkA', 'walkB', 'type', 'cheer', 'bid', 'box', 'coin'] as const;
+const SEATS: Record<string, { row: Row; x: number }> = {
+  'researcher-2': { row: 'back', x: 286 }, reader: { row: 'back', x: 376 }, 'writer-2': { row: 'back', x: 457 },
+  'illustrator-2': { row: 'back', x: 539 }, producer: { row: 'back', x: 617 }, investigator: { row: 'back', x: 685 },
+  auditor: { row: 'back', x: 758 }, 'auditor-2': { row: 'back', x: 834 },
+  scout: { row: 'front', x: 246 }, researcher: { row: 'front', x: 343 }, writer: { row: 'front', x: 440 },
+  illustrator: { row: 'front', x: 547 }, analyst: { row: 'front', x: 643 }, messenger: { row: 'front', x: 745 },
+};
+// Frames in each strip (web/public/agents/poses/<name>.webp, made by design/scripts/poses.py), all facing right;
+// 'type' and 'look' are seated, facing out.
+const FRAMES = ['idle', 'walkA', 'walkB', 'type', 'cheer', 'bid', 'box', 'coin', 'look'] as const;
 type Pose = 'idle' | 'bid' | 'cheer' | 'box' | 'coin';
 const cq = (px: number) => `${(px / W) * 100}cqw`;
 
@@ -71,8 +80,8 @@ function beatsOf(o: Order, lots: LiveLot[], steps: Step[]): Beat[] {
   return out;
 }
 
-// 'desk' is an agent's own chair or standing spot; 'up' is standing in front of it.
-type Place = 'desk' | 'up' | 'street' | { hall: number };
+// 'desk' is an agent's own chair.
+type Place = 'desk' | 'street' | { hall: number };
 type Scene = {
   place: Record<string, Place>;
   pose: Record<string, Pose>;
@@ -161,7 +170,7 @@ function fold(beats: Beat[]): Scene {
       case 'accept':
         s.end = 'accepted';
         delete s.pose.messenger;
-        for (const a of Object.keys(s.won)) if (s.won[a] > 0 && a !== 'messenger') { s.place[a] = 'up'; s.pose[a] = 'coin'; }
+        for (const a of Object.keys(s.won)) if (s.won[a] > 0 && a !== 'messenger') { s.place[a] = 'desk'; s.pose[a] = 'coin'; }
         s.caption = 'Accepted. The bank pays each winner from escrow, straight to their NEAR account.';
         break;
       case 'reject':
@@ -181,20 +190,25 @@ function fold(beats: Beat[]): Scene {
 }
 
 type Pt = { x: number; y: number; floor: number };
-type Goal = Pt & { sit?: boolean };
+type Goal = Pt & { sit?: boolean; row?: Row };
+/** The desk row someone is walking or sitting behind, if any. */
+const rowAt = (p: Pt) => (p.floor === 1 ? (['back', 'front'] as Row[]).find((r) => Math.abs(p.y - ROWS[r].walk) < 1) : undefined);
 
 function goalOf(id: string, p: Place): Goal {
   if (p === 'street') return { x: COUNTER.x, y: COUNTER.y, floor: 2 };
   if (typeof p === 'object') return { x: HALL[p.hall], y: FLOOR[0], floor: 0 };
-  const c = SITS.indexOf(id);
-  if (c >= 0) return { x: CHAIRS[c], y: FLOOR[1], floor: 1, sit: p === 'desk' };
-  const st = STANDS[id] ?? { x: 60, floor: 1 };
-  return { x: st.x, y: FLOOR[st.floor], floor: st.floor };
+  const seat = SEATS[id] ?? { row: 'front', x: 860 };
+  return { x: seat.x, y: ROWS[seat.row].walk, floor: 1, sit: true, row: seat.row };
 }
 
-/** The way from one spot to another: along the floor to the stairwell, up or down it, along to the goal. */
-function route(from: Pt, to: Goal): Pt[] {
+/** The way from one spot to another: out from behind a desk, along the floor to the stairwell, up or down it,
+ * along to the goal and in behind its desk. */
+function route(at: Pt, to: Goal): Pt[] {
   const out: Pt[] = [];
+  const fromRow = rowAt(at);
+  if (fromRow && fromRow === to.row) return [to];
+  if (fromRow) out.push({ x: ROWS[fromRow].exit, y: at.y, floor: 1 }, { x: ROWS[fromRow].exit, y: FLOOR[1], floor: 1 });
+  const from = out[out.length - 1] ?? at;
   const behindCounter = (p: Pt) => p.floor === 2 && p.y < FLOOR[2] - 10;
   if (behindCounter(from) && !behindCounter(to)) out.push({ x: COUNTER.past, y: FLOOR[2], floor: 2 });
   if (from.floor !== to.floor) {
@@ -203,11 +217,12 @@ function route(from: Pt, to: Goal): Pt[] {
     for (let f = from.floor + d; ; f += d) { out.push({ x: STAIR, y: FLOOR[f], floor: f }); if (f === to.floor) break; }
   }
   if (behindCounter(to) && !behindCounter(from)) out.push({ x: COUNTER.past, y: FLOOR[2], floor: 2 });
+  if (to.row) out.push({ x: ROWS[to.row].exit, y: FLOOR[1], floor: 1 }, { x: ROWS[to.row].exit, y: to.y, floor: 1 });
   out.push(to);
   return out;
 }
 
-type Body = Pt & { id: string; path: Pt[]; goal: Goal; face: 1 | -1; walked: number; seated: boolean; moving: boolean; pose?: Pose; busy: boolean; el?: HTMLDivElement | null; spr?: HTMLDivElement | null };
+type Body = Pt & { id: string; path: Pt[]; goal: Goal; face: 1 | -1; walked: number; seated: boolean; moving: boolean; pose?: Pose; busy: boolean; el?: HTMLDivElement | null; spr?: HTMLDivElement | null; lab?: HTMLElement | null };
 
 /** Everyone's position, moved every frame at one walking speed; React only says where each one should be. */
 class Crowd {
@@ -223,7 +238,7 @@ class Crowd {
     for (const id of ROSTER) {
       const g = goalOf(id, 'desk');
       const old = this.bodies.get(id);
-      this.bodies.set(id, { ...g, id, path: [], goal: g, face: g.x > BOARD ? -1 : 1, walked: 0, seated: !!g.sit, moving: false, busy: false, el: old?.el, spr: old?.spr });
+      this.bodies.set(id, { ...g, id, path: [], goal: g, face: g.x > BOARD ? -1 : 1, walked: 0, seated: !!g.sit, moving: false, busy: false, el: old?.el, spr: old?.spr, lab: old?.lab });
     }
   }
 
@@ -290,39 +305,49 @@ class Crowd {
       frame = b.pose === 'box' ? 'box' : Math.floor(phase) % 2 ? 'walkB' : 'walkA';
       lift = Math.abs(Math.sin(phase * Math.PI)) * 3.2;
     } else if (b.seated) {
-      frame = 'type';
-      if (b.busy) lift = Math.sin(t / 55) > 0 ? 1.2 : 0;
+      // At work: head down typing, looking up now and then; while talking, mostly looking out.
+      // Someone being paid looks up at the coin.
+      const glance = b.pose === 'coin' || Math.sin(t / (b.busy ? 600 : 2300) + b.goal.x) > (b.busy ? -0.3 : 0.8);
+      frame = glance ? 'look' : 'type';
+      if (frame === 'type') lift = Math.sin(t / 55) > 0 ? 0.9 : 0;
     } else {
       frame = b.pose ?? 'idle';
       if (frame === 'cheer') lift = Math.abs(Math.sin(t / 160)) * 6;
       else lift = Math.sin(t / 700 + b.goal.x) * 0.6; // breathing
     }
-    const y = b.seated && !moving ? SEAT : b.y;
+    const row = rowAt(b);
+    const sitting = b.seated && !moving && !!row;
+    const y = sitting ? ROWS[row!].sit : b.y;
     const behind = b.floor === 2 && b.y < FLOOR[2] - 10;
     b.el.style.left = `${(b.x / W) * 100}%`;
     b.el.style.top = `${(y / H) * 100}%`;
-    b.el.style.zIndex = b.seated && !moving ? '1' : behind ? '3' : '5';
-    b.el.classList.toggle('sit', b.seated && !moving);
+    b.el.style.zIndex = row ? String(ROWS[row].z) : behind ? '3' : '5';
+    b.el.classList.toggle('sit', sitting);
+    if (b.lab) {
+      // the name sits on the desk front while someone is behind it, under the feet otherwise
+      b.lab.style.left = b.el.style.left;
+      b.lab.style.top = `${((row ? ROWS[row].top + 5 : b.y + 6) / H) * 100}%`;
+    }
     b.el.classList.toggle('hall', b.floor === 0 && b.y < FLOOR[0] + 5);
     b.el.classList.toggle('l', b.x < W * 0.2);
     b.el.classList.toggle('r', b.x > W * 0.78);
     b.spr.style.backgroundPositionX = `${(FRAMES.indexOf(frame) / (FRAMES.length - 1)) * 100}%`;
-    const flip = frame !== 'type' && frame !== 'cheer' && b.face < 0 ? -1 : 1;
+    const flip = frame !== 'type' && frame !== 'look' && frame !== 'cheer' && b.face < 0 ? -1 : 1;
     b.spr.style.transform = `translateY(${cq(-lift)}) scaleX(${flip})`;
   }
 }
 
 function Figure({ id, crowd, tag, glow, bubble }: { id: string; crowd: Crowd; tag?: string; glow: boolean; bubble?: Scene['bubble'] }) {
   const n = NAMES[id];
-  const hold = (el: HTMLDivElement | null, k: 'el' | 'spr') => { const b = crowd.bodies.get(id); if (b) b[k] = el; };
-  return (
+  const hold = (el: HTMLDivElement | null, k: 'el' | 'spr' | 'lab') => { const b = crowd.bodies.get(id); if (b) b[k] = el; };
+  return (<>
     <div className={`wr-fig${glow ? ' glow' : ''}`} ref={(el) => hold(el, 'el')}>
       {bubble && <div className={`wr-bub ${bubble.kind}`} key={bubble.key}><b>{n}</b> {bubble.text.length > 90 ? `${bubble.text.slice(0, 88)}…` : bubble.text}</div>}
       {!bubble && tag && tag !== 'sealed' && <span className={`wr-tag${tag.startsWith('won') || tag.startsWith('passed') ? ' won' : tag.startsWith('failed') ? ' bad' : ''}`}>{tag}</span>}
       <div className="wr-spr" ref={(el) => hold(el, 'spr')} style={{ backgroundImage: `url(/agents/poses/${n.toLowerCase()}.webp)` }} role="img" aria-label={n} />
-      <small>{n}</small>
     </div>
-  );
+    <small className="wr-name" ref={(el) => hold(el as HTMLDivElement | null, 'lab')}>{n}</small>
+  </>);
 }
 
 /** A payout flying from the counter to its winner, along an arc. */
@@ -402,13 +427,14 @@ export function Workroom({ o, lots, steps, live }: { o: Order; lots: LiveLot[]; 
         {scene.pills.length > 0 && (
           <div className="wr-pills">{scene.pills.slice(-3).map((p) => <span key={p.handle} className={p.entered ? '' : 'out'}>{p.handle} · {usd(p.price)}</span>)}</div>
         )}
-        <img className="wr-chairs" src="/stage-chairs.webp" alt="" />
+        <img className="wr-desk back" src="/stage-desk-back.webp" alt="" />
+        <img className="wr-desk front" src="/stage-desk-front.webp" alt="" />
         {ROSTER.map((id) => (
           <Figure key={id} id={id} crowd={crowd} tag={scene.tag[id]} glow={scene.glow.has(id)} bubble={scene.bubble?.who === id ? scene.bubble : undefined} />
         ))}
         <img className="wr-counter" src="/stage-counter.png" alt="" />
         {scene.place.messenger === 'street' && kitIn && !scene.end && <span className="wr-parcel">Your work, boxed</span>}
-        {coins.map(([id, pay], i) => <Coin key={`${run}-${id}`} to={goalOf(id, 'up')} pay={pay} delay={500 + i * 220} />)}
+        {coins.map(([id, pay], i) => <Coin key={`${run}-${id}`} to={goalOf(id, 'desk')} pay={pay} delay={500 + i * 220} />)}
       </div>
       <div className="wr-bar">
         <div className="wr-top">
