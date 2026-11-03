@@ -90,7 +90,7 @@ Watch an order on its job page: sealed bids lock in, prices are revealed, winner
 Demo mode needs no keys and no wallet. Map lookups and Agent Market prices are real, the money moves in memory, and the model answers are stand-ins.
 
 ```bash
-git clone https://github.com/neromtoobad/parallax-near && cd parallax-near
+git clone https://github.com/neromtoobad/parallax && cd parallax
 cd server && npm install && npm run dev        # API on :8790
 cd ../web && npm install && npm run dev        # site on :5190
 ```
