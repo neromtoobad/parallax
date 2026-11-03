@@ -5,7 +5,7 @@ import type { ReceiptLine } from './meter.ts';
 import type { Winner } from './lots.ts';
 import { accountOf, leadOf, type Role } from './wallets.ts';
 
-export type Step = { at: string; agent: Role | 'cfo'; kind: string; text: string };
+export type Step = { at: string; agent: Role | 'cfo'; kind: string; text: string; account: string };
 export type Policy = { budgetUsd: number; allowHosts: string[] };
 
 export class Job {
@@ -27,9 +27,9 @@ export class Job {
   spentUsd() { return this.receipt.reduce((t, r) => t + r.usd, 0); }
 
   log(agent: Role | 'cfo', kind: string, text: string) {
-    const s = { at: new Date().toISOString(), agent: agent === 'cfo' ? agent : this.who(agent), kind, text };
+    const s: Step = { at: new Date().toISOString(), agent: agent === 'cfo' ? agent : this.who(agent), kind, text, account: agent === 'cfo' ? 'cfo' : this.payer(agent) };
     this.steps.push(s);
-    publish({ type: 'step', orderId: this.orderId, data: { ...s, account: agent === 'cfo' ? 'cfo' : this.payer(agent) } });
+    publish({ type: 'step', orderId: this.orderId, data: s });
   }
 
   addReceipt(line: ReceiptLine) {

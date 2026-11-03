@@ -92,7 +92,7 @@ export async function buy<T>(
     job.addReceipt({
       at: new Date().toISOString(), agent: opts.agent, vendor: opts.vendor, url: opts.url,
       amount: String(Math.round(opts.expectUsd * 1e6)), usd: opts.expectUsd, transaction: 'dry-run',
-      reason: opts.reason, status: 200, dry: true,
+      reason: opts.reason, status: 200, dry: true, account,
     });
     return data;
   }

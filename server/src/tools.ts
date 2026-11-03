@@ -1,7 +1,10 @@
 // What an agent can use while it works. Model and picture calls go through meter.buy, so every one is
 // checked against the job's budget and allowlist and lands on the receipt, paid from the agent's account.
 // Map lookups (OpenStreetMap) and page reads are free and need no receipt.
-import { DRY, IMAGE_MODEL, MODEL } from './config.ts';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { DATA_DIR, IMAGE_MODEL, MODEL } from './config.ts';
 import type { Job } from './job.ts';
 import { buy } from './meter.ts';
 import { NEARAI, chatCost, imageCost } from './nearai.ts';
@@ -72,17 +75,27 @@ const UA = { 'user-agent': 'Parallax/1.0 (hackathon demo; github.com/neromtoobad
 
 export type Place = { name: string; kind: string; address: string; website?: string; phone?: string; email?: string; lat: number; lon: number; osm: string };
 
-/** Businesses of a kind around a city, from OpenStreetMap. `tags` are OSM key=value pairs (shop=bakery). */
-export async function places(city: string, tags: string[], n = 25, fixture?: () => Place[]): Promise<Place[]> {
-  if (DRY && fixture) return fixture();
+/** Businesses of a kind around a city's centre, from OpenStreetMap. `tags` are OSM key=value pairs (shop=bakery). */
+export async function places(city: string, tags: string[], n = 25): Promise<Place[]> {
+  // The same search within a week is read from disk: the map changes slowly and the public servers are busy.
+  const key = createHash('sha256').update(`${city.toLowerCase().trim()}|${[...tags].sort().join(',')}`).digest('hex').slice(0, 16);
+  const file = join(DATA_DIR, 'places', `${key}.json`);
+  if (existsSync(file) && Date.now() - statSync(file).mtimeMs < 7 * 86400_000) return (JSON.parse(readFileSync(file, 'utf8')) as Place[]).slice(0, n);
   const geo: any[] = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(city)}`, { headers: UA, signal: AbortSignal.timeout(20_000) }).then((r) => r.json());
   if (!geo.length) throw new Error(`couldn't find ${city} on the map`);
-  const [s, nn, w, e] = geo[0].boundingbox.map(Number); // south, north, west, east
-  const bbox = `${s},${w},${nn},${e}`;
-  const parts = tags.map((t) => { const [k, v] = t.split('='); return `nwr["${k}"${v ? `="${v}"` : ''}]["name"](${bbox});`; }).join('');
-  const q = `[out:json][timeout:25];(${parts});out center ${Math.max(n * 3, 60)};`;
-  const d: any = await overpass(q);
-  const out: Place[] = (d.elements ?? []).map((x: any) => {
+  const at = `${geo[0].lat},${geo[0].lon}`;
+  const parts = tags.map((t) => { const [k, v] = t.split('='); return `nwr["${k}"${v ? `="${v}"` : ''}]["name"](around:5000,${at});`; }).join('');
+  const d: any = await overpass(`[out:json][timeout:20];(${parts});out center 150;`).catch(() => null);
+  const out: Place[] = d ? fromOverpass(d, tags) : await fromNominatim(city, tags);
+  // Ones you can reach first, then ones with a website.
+  const score = (p: Place) => (p.email ? 2 : 0) + (p.phone ? 1 : 0) + (p.website ? 1 : 0) + (p.address ? 0.5 : 0);
+  const ranked = out.filter((p) => p.name).sort((a, b) => score(b) - score(a)).slice(0, 60);
+  if (ranked.length) { mkdirSync(join(DATA_DIR, 'places'), { recursive: true }); writeFileSync(file, JSON.stringify(ranked)); }
+  return ranked.slice(0, n);
+}
+
+const fromOverpass = (d: any, tags: string[]): Place[] =>
+  (d.elements ?? []).map((x: any) => {
     const t = x.tags ?? {};
     return {
       name: t.name, kind: tags.map((g) => t[g.split('=')[0]]).find(Boolean) ?? '',
@@ -91,18 +104,33 @@ export async function places(city: string, tags: string[], n = 25, fixture?: () 
       lat: x.lat ?? x.center?.lat, lon: x.lon ?? x.center?.lon, osm: `https://www.openstreetmap.org/${x.type}/${x.id}`,
     };
   });
-  // Ones you can reach first, then ones with a website.
-  const score = (p: Place) => (p.email ? 2 : 0) + (p.phone ? 1 : 0) + (p.website ? 1 : 0) + (p.address ? 0.5 : 0);
-  return out.filter((p) => p.name).sort((a, b) => score(b) - score(a)).slice(0, n);
+
+/** When the Overpass servers are busy: OpenStreetMap's own search, one request per tag, a second apart. */
+async function fromNominatim(city: string, tags: string[]): Promise<Place[]> {
+  const out: Place[] = [];
+  for (const t of tags) {
+    const what = (t.split('=')[1] ?? t).replace(/_/g, ' ');
+    const r: any[] = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=40&extratags=1&addressdetails=1&q=${encodeURIComponent(`${what} in ${city}`)}`, { headers: UA, signal: AbortSignal.timeout(20_000) }).then((x) => x.json()).catch(() => []);
+    for (const x of r) {
+      const e = x.extratags ?? {}, a = x.address ?? {};
+      out.push({
+        name: x.name || x.display_name.split(',')[0], kind: x.type, address: [a.house_number, a.road, a.city ?? a.town ?? a.suburb].filter(Boolean).join(' '),
+        website: e.website ?? e['contact:website'], phone: e.phone ?? e['contact:phone'], email: e.email ?? e['contact:email'],
+        lat: Number(x.lat), lon: Number(x.lon), osm: `https://www.openstreetmap.org/${x.osm_type}/${x.osm_id}`,
+      });
+    }
+    await new Promise((res) => setTimeout(res, 1100));
+  }
+  return out;
 }
 
-// Public Overpass servers are busy at times; try the next one.
-const OVERPASS = (process.env.OVERPASS_URLS ?? 'https://overpass-api.de/api/interpreter,https://overpass.private.coffee/api/interpreter,https://maps.mail.ru/osm/tools/overpass/api/interpreter').split(',');
+// Public Overpass servers are busy at times: try the next one, then fall back to Nominatim (places()).
+const OVERPASS = (process.env.OVERPASS_URLS ?? 'https://overpass-api.de/api/interpreter,https://maps.mail.ru/osm/tools/overpass/api/interpreter').split(',');
 async function overpass(q: string) {
   let last: unknown;
   for (const url of OVERPASS) {
     try {
-      const r = await fetch(url, { method: 'POST', headers: UA, body: new URLSearchParams({ data: q }), signal: AbortSignal.timeout(40_000) });
+      const r = await fetch(url, { method: 'POST', headers: UA, body: new URLSearchParams({ data: q }), signal: AbortSignal.timeout(12_000) });
       if (r.ok) return await r.json();
       last = new Error(`map server ${r.status}`);
     } catch (e) { last = e; }

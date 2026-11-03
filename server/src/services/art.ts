@@ -27,7 +27,7 @@ export async function direct(job: Job, brief: string, what: string, dry: { palet
 
 /** Demo mode's picture: soft shapes in the palette, as an SVG data URL. */
 export function placeholder(p: Palette) {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><rect width="1024" height="1024" fill="${p.soft}"/><circle cx="700" cy="380" r="260" fill="${p.accent}" opacity=".85"/><circle cx="360" cy="640" r="200" fill="${p.ink}" opacity=".12"/><rect x="180" y="200" width="300" height="300" rx="40" fill="${p.bg}" opacity=".7"/></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" preserveAspectRatio="xMidYMid slice"><rect x="-1024" y="-1024" width="3072" height="3072" fill="${p.soft}"/><circle cx="700" cy="380" r="260" fill="${p.accent}" opacity=".85"/><circle cx="360" cy="640" r="200" fill="${p.ink}" opacity=".12"/><rect x="180" y="200" width="300" height="300" rx="40" fill="${p.bg}" opacity=".7"/></svg>`;
   return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
 }
 

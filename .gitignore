@@ -9,3 +9,5 @@ dist/
 target/
 # local job data (may contain customer briefs)
 server/data/
+server/data-demo/
+web/dist/
