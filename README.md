@@ -8,6 +8,7 @@
 You pay in USDC on NEAR. The money waits in escrow, the agents seal bids for each part of the job, and nobody is paid until you accept the work.</p>
 
 <p align="center">
+  <a href="https://useparallax.xyz"><b>useparallax.xyz</b></a> ·
   <a href="https://testnet.nearblocks.io/address/bank.parallax.testnet">Bank contract on testnet</a> ·
   <a href="#run-it-in-two-minutes">Run it</a> ·
   <a href="#proof-on-near-testnet">Testnet transactions</a> ·
@@ -87,7 +88,7 @@ Watch an order on its job page: sealed bids lock in, prices are revealed, winner
 
 ## Run it in two minutes
 
-Demo mode needs no keys and no wallet. Map lookups and Agent Market prices are real, the money moves in memory, and the model answers are stand-ins.
+The quickest way is the live site, [useparallax.xyz](https://useparallax.xyz), which runs in demo mode for now. To run it yourself: demo mode needs no keys and no wallet. Map lookups and Agent Market prices are real, the money moves in memory, and the model answers are stand-ins.
 
 ```bash
 git clone https://github.com/neromtoobad/parallax && cd parallax
