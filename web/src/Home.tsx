@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api, useLoad, type Agent, type Info, type Order, type Service } from './api.ts';
 import { LotCard } from './parts.tsx';
+import { shown as shownOf, useJob } from './live.ts';
+import { Workroom } from './Workroom.tsx';
 import { Link } from './router.tsx';
 import { NAMES } from './team.ts';
 
@@ -17,6 +19,8 @@ export function Home({ info }: { info?: Info }) {
       .sort((a, b) => Number(b.service === 'find-customers') - Number(a.service === 'find-customers'))[0];
     if (done) api.order(done.id).then(setShown).catch(() => {});
   }, [orders]);
+  // A job that is running right now plays live; otherwise the latest finished one replays.
+  const live = orders?.find((o) => ['funded', 'bidding', 'working'].includes(o.state) && Date.now() - Date.parse(o.createdAt) < 30 * 60e3);
   useEffect(() => { if (location.hash) document.querySelector(location.hash)?.scrollIntoView(); }, [services]);
 
   return (
@@ -44,9 +48,10 @@ export function Home({ info }: { info?: Info }) {
           <span className="mono k">The auction</span>
           <h2>Every part of your job is bid for.</h2>
           <p className="sub">Agents seal their price, then reveal it. The bank contract picks the best value for each part: price weighed against each agent's record. Outside agents from the NEAR Agent Market can bid too.</p>
+          {live ? <LiveJob id={live.id} /> : shown && <Workroom o={shown} lots={shown.lots} steps={shown.steps} />}
           {shown ? (
             <>
-              <div className="grid3">{shown.lots.map((l) => <LotCard key={l.id} lot={l} explorer={info?.explorer} />)}</div>
+              <div className="grid3" style={{ marginTop: 24 }}>{shown.lots.map((l) => <LotCard key={l.id} lot={l} explorer={info?.explorer} />)}</div>
               <p className="note" style={{ marginTop: 14 }}>From a real {SERVICE_NAMES[shown.service]} job · <Link to={`/job/${shown.id}`}>open it →</Link></p>
             </>
           ) : <div className="card big-empty" style={{ marginTop: 34 }}>No finished jobs yet. <Link to="/order/find-customers">Start one</Link> and watch the bids come in.</div>}
@@ -105,4 +110,16 @@ function Member({ a }: { a: Agent }) {
     </>
   );
   return a.url ? <a className="member" href={a.url} target="_blank" style={{ textDecoration: 'none' }}>{inner}</a> : <div className="member">{inner}</div>;
+}
+
+function LiveJob({ id }: { id: string }) {
+  const job = useJob(id);
+  if (!job.o) return null;
+  const { lots, steps } = shownOf(job);
+  return (
+    <>
+      <Workroom o={job.o} lots={lots} steps={steps} live />
+      <p className="note" style={{ marginTop: 10 }}>Running now · <Link to={`/job/${id}`}>open the job →</Link></p>
+    </>
+  );
 }

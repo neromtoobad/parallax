@@ -1,56 +1,43 @@
-import { useEffect, useState } from 'react';
-import { api, useEvents, usd, type Event, type Info, type Order, type Step } from './api.ts';
-import { Face, LotCard, type LiveLot } from './parts.tsx';
+import { useState } from 'react';
+import { api, usd, type Info, type Order } from './api.ts';
+import { Face, LotCard } from './parts.tsx';
+import { shown, useJob } from './live.ts';
+import { Workroom } from './Workroom.tsx';
 import { Link } from './router.tsx';
 import { nameOf } from './team.ts';
+import { acceptJob, rejectJob, useWallet } from './wallet.ts';
 
 const NAMES: Record<string, string> = { 'find-customers': 'Find customers', website: 'Website', flyers: 'Flyers' };
 const FLOW = ['funded', 'bidding', 'working', 'delivered', 'accepted'] as const;
 const FLOW_LABEL: Record<string, string> = { funded: 'Paid into escrow', bidding: 'Auction', working: 'Work', delivered: 'Delivered', accepted: 'Accepted · paid out' };
 const KIND: Record<string, string> = { start: 'started', done: 'done', note: 'note', search: 'searched', pass: 'passed it', fail: 'failed it', error: 'error', retry: 'retrying', hire: 'hired' };
 
-/** The lots as the event stream tells it, phase by phase. */
-function applyLot(lots: LiveLot[], d: any): LiveLot[] {
-  if (d.phase === 'plan') return d.lots.map((p: any, i: number) => ({ id: -1 - i, title: p.title, roles: p.roles, reserve: p.reserve, status: 'bidding', bids: [], sealed: [], quotes: [] }));
-  const at = lots.findIndex((l) => l.id === d.lot) >= 0 ? lots.findIndex((l) => l.id === d.lot) : lots.findIndex((l) => l.title === d.title && l.id < 0);
-  if (at < 0) return lots;
-  const l = { ...lots[at] }, next = [...lots];
-  next[at] = l;
-  switch (d.phase) {
-    case 'open': Object.assign(l, { id: d.lot, status: 'bidding', ...(d.round > 1 ? { round: d.round, bids: [], sealed: [], quotes: [], winner: undefined, pay: undefined } : {}) }); break;
-    case 'commit': l.sealed = [...(l.sealed ?? []), d.agent]; break;
-    case 'quote': l.quotes = [...(l.quotes ?? []), { handle: d.agent, price: d.price, quality: d.quality, entered: d.entered, why: d.why ?? '' }]; break;
-    case 'reveal': l.bids = [...l.bids, { agent: d.agent, role: d.role, price: d.price }]; break;
-    case 'award': Object.assign(l, { status: 'awarded', winner: d.role === 'outside' ? `outside:${d.winner}` : d.winner, bid: d.bid, pay: d.pay, tx: d.tx }); break;
-    case 'void': l.status = 'void'; break;
-    case 'pass-inspection': l.status = 'passed'; break;
-    case 'fail-inspection': l.status = 'failed'; break;
-  }
-  return next;
-}
-
 export function JobPage({ id, info }: { id: string; info?: Info }) {
-  const [o, setO] = useState<Order>();
-  const [lots, setLots] = useState<LiveLot[]>([]);
-  const [steps, setSteps] = useState<Step[]>([]);
-  const [missing, setMissing] = useState(false);
+  const job = useJob(id);
+  const { o, missing, setO } = job;
   const [busy, setBusy] = useState(false);
-  const load = () => api.order(id).then((x) => { setO(x); if (x.lots.length && !['bidding'].includes(x.state)) setLots([]); }).catch(() => setMissing(true));
-  useEffect(() => { void load(); }, [id]);
-  useEvents(id, (e: Event) => {
-    if (e.type === 'lot') setLots((l) => applyLot(l, e.data));
-    if (e.type === 'step') setSteps((s) => (s.some((x) => x.at === e.data.at && x.text === e.data.text) ? s : [...s, e.data]));
-    if (e.type === 'order' || e.type === 'bill') void load();
-  });
+  const [err, setErr] = useState('');
+  const wallet = useWallet(info);
   if (missing) return <div className="wrap"><p className="big-empty">No job with that number. <Link to="/">Home</Link></p></div>;
   if (!o) return null;
 
-  const shownLots: LiveLot[] = lots.length && (o.state === 'bidding' || o.state === 'working' || !o.lots.length) ? lots : o.lots;
-  const shownSteps = o.steps.length >= steps.length ? o.steps : steps;
+  const { lots: shownLots, steps: shownSteps, receipt: shownReceipt } = shown(job);
   const stage = FLOW.indexOf(o.state as any);
   const spent = o.receipt.reduce((t, r) => t + r.usd, 0);
   const paidOut = o.lots.filter((l) => l.status === 'passed').reduce((t, l) => t + (l.pay ?? 0), 0);
-  const accept = async () => { setBusy(true); try { setO(await api.accept(o.id)); } catch (e: any) { alert(e.message); } setBusy(false); };
+  const ownWallet = !!info && info.mode !== 'demo' && o.customer !== info.house;
+  const mine = ownWallet && wallet.account === o.customer;
+  const decide = async (yes: boolean) => {
+    setBusy(true); setErr('');
+    try {
+      if (ownWallet) {
+        if (!mine) { await wallet.connect(); throw new Error(`Sign in as ${o.customer} to ${yes ? 'accept' : 'reject'} this job`); }
+        const tx = await (yes ? acceptJob : rejectJob)(info!, o.id);
+        setO(await (yes ? api.accept : api.reject)(o.id, tx));
+      } else setO(await api.accept(o.id));
+    } catch (e: any) { setErr(e.message); }
+    setBusy(false);
+  };
 
   return (
     <div className="wrap">
@@ -68,11 +55,21 @@ export function JobPage({ id, info }: { id: string; info?: Info }) {
 
       {o.state === 'delivered' && (
         <div className="acc">
-          <div><b style={{ fontSize: 20 }}>Delivered and checked.</b><p>Accept it and the bank pays each winner from your escrow. {o.delivery?.check.notes[0] ?? ''}</p></div>
-          <button className="pill light" onClick={accept} disabled={busy}>{busy ? 'Accepting…' : 'Accept the work'} <b>→</b></button>
+          <div>
+            <b style={{ fontSize: 20 }}>Delivered and checked.</b>
+            <p>Accept it and the bank pays each winner from your escrow.{ownWallet ? ' Reject it and the bank refunds the full price.' : ''} {o.delivery?.check.notes[0] ?? ''}</p>
+            {err && <p className="err">{err}</p>}
+          </div>
+          <div className="ctas" style={{ margin: 0 }}>
+            <button className="pill light" onClick={() => decide(true)} disabled={busy}>{busy ? 'Waiting for the bank…' : ownWallet ? 'Accept from my wallet' : 'Accept the work'} <b>→</b></button>
+            {ownWallet && <button className="ghost" onClick={() => decide(false)} disabled={busy}>Reject and refund</button>}
+          </div>
         </div>
       )}
+      {o.state === 'rejected' && <div className="card" style={{ marginBottom: 20 }}><b>Rejected.</b> <span className="note">The bank refunded the full price to {o.customer}. Nobody was paid for this job.</span></div>}
       {o.state === 'failed' && <div className="card" style={{ borderColor: 'var(--red)', marginBottom: 20 }}><b>The job stopped.</b> <span className="note">{o.error} Lots that fail inspection are paid nothing; the escrow goes back to you.</span></div>}
+
+      <div className="jobwr"><Workroom o={o} lots={shownLots} steps={shownSteps} live /></div>
 
       <div className="cols">
         <div>
@@ -103,7 +100,7 @@ export function JobPage({ id, info }: { id: string; info?: Info }) {
               {o.state === 'accepted' && <li><span>Paid out to winners</span><b className="num">{usd(paidOut)} USDC</b></li>}
             </ul>
             {o.txs.length > 0 && <><h3 style={{ marginTop: 16 }}>On NEAR</h3><ul>{o.txs.map((t) => <li key={t.hash}><span>{t.what}</span><a href={t.url} target="_blank">{t.hash.slice(0, 8)}… ↗</a></li>)}</ul></>}
-            {o.receipt.length > 0 && <><h3 style={{ marginTop: 16 }}>Receipt</h3><ul>{o.receipt.map((r, i) => (
+            {shownReceipt.length > 0 && <><h3 style={{ marginTop: 16 }}>Receipt</h3><ul>{shownReceipt.map((r, i) => (
               <li key={i}><span>{nameOf(r.account ?? r.agent)} · {r.reason}</span><span className="num">{usd(r.usd, 5)}{r.settledTx && info?.explorer ? <> · <a href={`${info.explorer}/txns/${r.settledTx}`} target="_blank">paid ↗</a></> : null}</span></li>
             ))}</ul></>}
           </div>
