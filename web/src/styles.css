@@ -133,6 +133,7 @@ textarea.i{min-height:96px;resize:vertical}
 .tx a{color:var(--cyan-ink);font-family:'JetBrains Mono',monospace;font-size:12px}
 .tx li{list-style:none;padding:6px 0;border-bottom:1px solid var(--line);font-size:14px;display:flex;justify-content:space-between;gap:12px}
 .tx ul{padding:0}
+.recent .tx li{display:grid;grid-template-columns:1fr auto 88px;align-items:baseline}.recent .tx li .num{text-align:right}.recent .tx li .mono{text-align:right;font-size:12px}
 table.leads{width:100%;border-collapse:collapse;font-size:14px}
 table.leads th{text-align:left;font-weight:600;color:var(--muted);font-size:12px;padding:8px;border-bottom:1px solid var(--line)}
 table.leads td{padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:top}
@@ -214,8 +215,17 @@ table.leads td b{font-size:15px}
   .hero:before{background:linear-gradient(180deg,rgba(0,0,0,.55),rgba(0,0,0,.8))}
   .grid3,.how,.cols,.flyers{grid-template-columns:1fr}
   .team{grid-template-columns:repeat(3,1fr)}
-  footer{grid-template-columns:1fr;padding:36px 24px}
+  footer{grid-template-columns:1fr 1fr;padding:32px 24px;gap:26px 20px;margin-top:64px}footer>div:first-child{grid-column:1/-1}
   .panel{padding:22px}
+}
+@media(max-width:640px){
+  .hero{background-position:24% center}
+  .hero:before{background:linear-gradient(180deg,rgba(0,0,0,.6),rgba(0,0,0,.45) 50%,rgba(0,0,0,.8))}
+  .hero .in{padding:64px 22px 84px}.hero h1{margin:16px 0 20px}.hero .lede{font-size:17px}
+  .hero .foot{font-size:11px}.hero .foot .scroll{display:none}
+  section.s{padding:64px 0 6px}
+  .sub{font-size:16px}
+  .team{gap:10px}.member .t{padding:8px 10px 10px}.member b{font-size:15px}.member small{font-size:11px}
 }
 
 /* Who pays: house wallet or the customer's own */

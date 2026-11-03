@@ -33,7 +33,7 @@ export function Home({ info }: { info?: Info }) {
           <div className="ctas"><Link className="pill light" to="/#services">See what we do <b>→</b></Link><Link className="pill glass" to="/#auction">Watch an auction <b>→</b></Link></div>
           <div className="svc">{Object.entries(SERVICE_NAMES).map(([id, n]) => <Link key={id} to={`/order/${id}`}>{n}</Link>)}</div>
         </div>
-        <div className="foot mono"><span>USDC on NEAR · pay only if you accept</span><span>Scroll ↓</span></div>
+        <div className="foot mono"><span>USDC on NEAR · pay only if you accept</span><span className="scroll">Scroll ↓</span></div>
       </div>
 
       <div className="wrap">
@@ -56,7 +56,7 @@ export function Home({ info }: { info?: Info }) {
             </>
           ) : <div className="card big-empty" style={{ marginTop: 34 }}>No finished jobs yet. <Link to="/order/find-customers">Start one</Link> and watch the bids come in.</div>}
           {orders && orders.length > 1 && (
-            <div className="card" style={{ marginTop: 18 }}>
+            <div className="card recent" style={{ marginTop: 18 }}>
               <h3>Recent jobs <span className="chip mono"><i className="dot pulse" />live</span></h3>
               <div className="tx"><ul>{orders.slice(0, 6).map((o) => (
                 <li key={o.id}><Link to={`/job/${o.id}`}>{SERVICE_NAMES[o.service] ?? o.service}</Link><span className="num">{o.priceUsd} USDC</span><span className="mono" style={{ color: 'var(--muted)' }}>{o.state}</span></li>
@@ -106,7 +106,7 @@ function Member({ a }: { a: Agent }) {
     <>
       <img src={`/agents/${(NAMES[a.id] ?? a.name).toLowerCase()}.jpg`} alt={a.name} loading="lazy" />
       <div className="about">{a.about}</div>
-      <div className="t"><b>{a.name}</b><small>{a.title} · rep {a.rep}</small></div>
+      <div className="t"><b>{a.name}</b><small>{a.title}</small><small className="num">rep {a.rep}</small></div>
     </>
   );
   return a.url ? <a className="member" href={a.url} target="_blank" style={{ textDecoration: 'none' }}>{inner}</a> : <div className="member">{inner}</div>;
