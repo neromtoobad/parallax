@@ -52,7 +52,7 @@ export function Home({ info }: { info?: Info }) {
           {shown ? (
             <>
               <div className="grid3" style={{ marginTop: 24 }}>{shown.lots.map((l) => <LotCard key={l.id} lot={l} explorer={info?.explorer} />)}</div>
-              <p className="note" style={{ marginTop: 14 }}>From a real {SERVICE_NAMES[shown.service]} job · <Link to={`/job/${shown.id}`}>open it →</Link></p>
+              <p className="note" style={{ marginTop: 14 }}>From a real {SERVICE_NAMES[shown.service]} job · <Link to={`/job/${shown.id}`}>open it →</Link> · <Link to="/proof">check every auction on NEAR yourself →</Link></p>
             </>
           ) : <div className="card big-empty" style={{ marginTop: 34 }}>No finished jobs yet. <Link to="/order/find-customers">Start one</Link> and watch the bids come in.</div>}
           {orders && orders.length > 1 && (

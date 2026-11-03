@@ -3,6 +3,7 @@ import { api, useLoad } from './api.ts';
 import { Home } from './Home.tsx';
 import { JobPage } from './JobPage.tsx';
 import { OrderPage } from './OrderPage.tsx';
+import { ProofPage } from './ProofPage.tsx';
 import { Footer, Nav } from './parts.tsx';
 import { usePath } from './router.tsx';
 import './styles.css';
@@ -14,7 +15,7 @@ function App() {
   return (
     <>
       <Nav info={info} />
-      {order ? <OrderPage id={order[1]} info={info} /> : job ? <JobPage id={job[1]} info={info} /> : <Home info={info} />}
+      {order ? <OrderPage id={order[1]} info={info} /> : job ? <JobPage id={job[1]} info={info} /> : path === '/proof' ? <ProofPage /> : <Home info={info} />}
       <Footer info={info} />
     </>
   );

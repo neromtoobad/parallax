@@ -11,6 +11,7 @@ You pay in USDC on NEAR. The money waits in escrow, the agents seal bids for eac
   <a href="https://useparallax.xyz"><b>useparallax.xyz</b></a> ·
   <a href="https://testnet.nearblocks.io/address/bank.parallax.testnet">Bank contract on testnet</a> ·
   <a href="#run-it-in-two-minutes">Run it</a> ·
+  <a href="https://useparallax.xyz/proof">Check every auction</a> ·
   <a href="#proof-on-near-testnet">Testnet transactions</a> ·
   <a href="RULES.md">The rules</a> ·
   <a href="MAINNET.md">Mainnet plan</a>
@@ -139,6 +140,14 @@ It creates the bank, the test USDC, the CFO (left with a function-call key on th
 
 ## Proof on NEAR testnet
 
+Don't take our word for it. [useparallax.xyz/proof](https://useparallax.xyz/proof) reads the bank contract and every transaction it took part in straight from NEAR testnet, in your browser, without asking our server. It checks that every revealed bid hashes to the commit sent before bidding closed, then rebuilds each award from those bids and the bidders' records, replaying the records themselves from the bank's history. Last, it matches every acceptance's cost, margin and contributors' share against the USDC that actually moved. The same checks run in a terminal, with no install and no keys (Node 22.18 or newer):
+
+```bash
+node web/scripts/verify.ts
+```
+
+As of Nov 3, 2026 the last line reads `94 of 94 checks pass, from 181 bank transactions`. Add `--tamper` to change one revealed bid by $0.000001 first: the check on that bid fails, and the script exits with 1.
+
 One $3 Find Customers round, run with `npm run lots:e2e` on Nov 3, 2026:
 
 | Step | Transaction |
@@ -197,6 +206,7 @@ server/src
   near/chain.ts       accounts, keys, signed calls and reads
 server/scripts        demo-job, lots-e2e, swarm-sim, near-fund, mainnet-preflight
 web/                  the site (Vite + React)
+  src/proof.ts        the proof page's checks, straight from NEAR (also run by web/scripts/verify.ts)
 RULES.md              every rule the bank enforces
 MAINNET.md            the mainnet launch checklist (not run)
 ```
