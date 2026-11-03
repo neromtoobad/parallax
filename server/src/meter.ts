@@ -4,7 +4,7 @@
 // After it: the measured cost becomes a receipt line booked to that agent. settle.ts then has each
 // agent pay what it used from its own account to the compute account, one transfer per agent per job,
 // and writes that transaction onto the receipt lines. No receipt, no spend.
-import { DRY } from './config.ts';
+import { CANNED, DRY } from './config.ts';
 import { NEARAI_HOST, nearaiKey } from './nearai.ts';
 import { NEAR, usdcOf } from './near/chain.ts';
 import { type Role } from './wallets.ts';
@@ -83,7 +83,7 @@ export async function buy<T>(
     throw new SpendRefused(`${opts.agent}: job budget ${job.policy.budgetUsd} USDC would be exceeded`);
   }
 
-  if (DRY) {
+  if (DRY || CANNED) {
     // test hook: PARALLAX_DRY_FAIL="NEAR AI" makes that vendor fail like a provider that is down
     if (process.env.PARALLAX_DRY_FAIL && opts.vendor.includes(process.env.PARALLAX_DRY_FAIL)) throw new Error('provider unavailable, please retry');
     const delay = Number(process.env.PARALLAX_DRY_DELAY ?? 0);

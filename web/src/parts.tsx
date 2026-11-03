@@ -30,8 +30,8 @@ export function Footer({ info }: { info?: Info }) {
       <div><h4 className="mono">Hire the team</h4><Link to="/order/find-customers">Find customers</Link><Link to="/order/website">Website</Link><Link to="/order/flyers">Flyers</Link></div>
       <div><h4 className="mono">How it runs</h4><Link to="/#auction">The auction</Link><Link to="/#how">Escrow and payouts</Link><a href="https://github.com/neromtoobad" target="_blank">Source ↗</a></div>
       <div><h4 className="mono">On NEAR</h4>
-        {info?.bank && ex ? <a href={`${ex}/address/${info.bank}`} target="_blank">The bank contract ↗</a> : <span style={{ color: 'var(--on-deep-2)' }}>Bank contract (testnet)</span>}
-        {info?.usdc && ex ? <a href={`${ex}/address/${info.usdc}`} target="_blank">Test USDC ↗</a> : null}
+        {info?.bank && ex ? <a href={`${ex}/address/${info.bank}`} target="_blank">The bank contract ↗</a> : <span style={{ color: 'var(--on-deep-2)' }}>Bank contract</span>}
+        {info?.usdc && ex ? <a href={`${ex}/address/${info.usdc}`} target="_blank">{info.mode === 'mainnet' ? 'USDC' : 'Test USDC'} ↗</a> : null}
         <a href="https://market.near.ai" target="_blank">NEAR Agent Market ↗</a><a href="https://near.ai" target="_blank">NEAR AI Cloud ↗</a>
       </div>
     </footer>

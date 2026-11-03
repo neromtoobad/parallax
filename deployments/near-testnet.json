@@ -24,5 +24,6 @@
     "producer": "producer.team.parallax.testnet",
     "investigator": "investigator.team.parallax.testnet"
   },
-  "compute": "compute.parallax.testnet"
+  "compute": "compute.parallax.testnet",
+  "house": "house.parallax.testnet"
 }

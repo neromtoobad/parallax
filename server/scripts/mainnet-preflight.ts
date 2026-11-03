@@ -16,7 +16,7 @@ const REPO = new URL('../../', import.meta.url).pathname;
 const ROLES = ['scout', 'researcher', 'writer', 'illustrator', 'reader', 'analyst', 'messenger', 'auditor', 'producer', 'investigator'];
 const AGENTS = [...ROLES, 'researcher-2', 'writer-2', 'illustrator-2', 'auditor-2'].map((r) => `${r}.team.${ROOT}`);
 const ACCOUNTS = ['bank', 'cfo', 'contributors', 'compute', 'team'].map((a) => `${a}.${ROOT}`).concat(AGENTS);
-const NEED_NEAR = 7.9 + 0.5; // deploy.sh's plan for 14 agents, plus room for the root's own storage and retries
+const NEED_NEAR = 4.33 + 0.1; // deploy.sh's lean mainnet plan for 14 agents, plus a little for retries
 
 let blocking = 0;
 const ok = (s: string) => console.log(`  ok    ${s}`);

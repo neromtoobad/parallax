@@ -10,4 +10,5 @@ target/
 # local job data (may contain customer briefs)
 server/data/
 server/data-demo/
+server/data-testnet/
 web/dist/

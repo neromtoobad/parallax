@@ -1,0 +1,15 @@
+[package]
+name = "parallax-cleanup"
+version = "0.1.0"
+edition = "2021"
+description = "Replaces the bank's code at teardown so its storage can be cleared and its NEAR returned"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+panic = "abort"
+codegen-units = 1
+strip = true

@@ -27,6 +27,7 @@ export type Deployment = {
   cfo: string;
   contributors: string;
   compute?: string; // receives what agents pay for their model calls
+  house?: string; // pays for demo jobs; hired by the bank so the CFO can top it up
   team: Record<string, string>;
 };
 
@@ -131,6 +132,8 @@ let seenHeight = 0;
  * The transaction is signed here, so its hash is known before it is sent: when a node errors after the
  * send (public RPCs time out on cross-contract calls), we look the hash up instead of guessing, and only
  * sign again when the chain has never seen it. That is what keeps a flaky node from paying twice.
+ * The signer must hold the whole prepaid gas up front (about 0.001 NEAR per Tgas, mostly refunded), so each
+ * call asks for what it needs rather than the most it could: 30 Tgas unless it says otherwise.
  */
 export function call(signer: string, contract: string, method: string, args: object, o: { deposit?: bigint; tgas?: number } = {}): Promise<Sent> {
   return serial(signer, async () => {
@@ -138,11 +141,13 @@ export function call(signer: string, contract: string, method: string, args: obj
       let hash: string | undefined;
       try {
         const signed = await account(signer).createSignedTransaction({
-          receiverId: contract, actions: [actions.functionCall(method, args, BigInt(o.tgas ?? 100) * TGAS, o.deposit ?? 0n)],
+          receiverId: contract, actions: [actions.functionCall(method, args, BigInt(o.tgas ?? 30) * TGAS, o.deposit ?? 0n)],
         });
         hash = baseEncode(createHash('sha256').update(encodeTransaction(signed.transaction)).digest());
         await rpc().sendTransactionUntil(signed, 'INCLUDED').catch((e: any) => {
-          if (/panicked|InvalidNonce|expired|NotEnoughBalance|InvalidAccessKey|DoesNotFitStorage/i.test(String(e?.message ?? e))) throw e;
+          const m = String(e?.message ?? e);
+          if (/NotEnoughBalance|Not enough balance/i.test(m)) throw new ChainError(`${signer} has too little NEAR to cover this call's gas (${o.tgas ?? 30} Tgas needs about ${((o.tgas ?? 30) / 1000).toFixed(3)} NEAR free)`);
+          if (/panicked|InvalidNonce|expired|LackBalanceForState|InvalidAccessKey|DoesNotFitStorage/i.test(m)) throw e;
           // anything else: the node may still have taken it; the status lookup below decides
         });
         const r = await outcome(hash, signer);
@@ -267,8 +272,8 @@ export function events(logs: string[], name?: string): { event: string; data: an
 
 /** Send USDC from an account we hold the key for (an agent paying for its own work). */
 export const sendUsdc = (from: string, to: string, usd: number, memo: string) =>
-  call(from, NEAR!.usdc, 'ft_transfer', { receiver_id: to, amount: toUnits(usd), memo: memo.slice(0, 120) }, { deposit: 1n, tgas: 30 });
+  call(from, NEAR!.usdc, 'ft_transfer', { receiver_id: to, amount: toUnits(usd), memo: memo.slice(0, 120) }, { deposit: 1n, tgas: 15 });
 
 /** Send USDC into the bank with a message (a deposit, or `job:<id>` to fund a job). */
 export const payBank = (from: string, usd: number, msg: string) =>
-  call(from, NEAR!.usdc, 'ft_transfer_call', { receiver_id: NEAR!.bank, amount: toUnits(usd), msg }, { deposit: 1n, tgas: 100 });
+  call(from, NEAR!.usdc, 'ft_transfer_call', { receiver_id: NEAR!.bank, amount: toUnits(usd), msg }, { deposit: 1n, tgas: 80 });

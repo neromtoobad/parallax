@@ -6,9 +6,10 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { relative } from 'node:path';
-import { DRY, MODEL, PORT, WEB_DIR } from './config.ts';
+import { CANNED, DRY, MODEL, PORT, WEB_DIR } from './config.ts';
 import { backlog, bus, type Event } from './bus.ts';
-import { accept, fund, getOrder, listOrders, quote, sitePath, type Order } from './orders.ts';
+import { accept, demoPayer, fund, getOrder, listOrders, quote, rejected, sitePath, type Order } from './orders.ts';
+import { startTreasury } from './cfo/loop.ts';
 import { SERVICES } from './services/index.ts';
 import { ROSTER } from './wallets.ts';
 import { NEAR, accountUrl, view } from './near/chain.ts';
@@ -16,6 +17,7 @@ import { registerSearch, searchOn } from './market.ts';
 import { accountOf } from './wallets.ts';
 
 registerSearch();
+startTreasury();
 const app = new Hono();
 
 /** What the site may see of an order: the brief stays with the customer if the order is private. */
@@ -23,7 +25,8 @@ const view_ = (o: Order) => ({ ...o, input: o.private ? undefined : o.input, bri
 
 app.get('/api/info', (c) => c.json({
   mode: DRY ? 'demo' : NEAR?.network, model: MODEL, bank: NEAR?.bank ?? null, explorer: NEAR?.explorer ?? null,
-  usdc: NEAR?.usdc ?? null, search: searchOn(),
+  usdc: NEAR?.usdc ?? null, search: searchOn(), canned: DRY || CANNED, house: DRY ? null : demoPayer() || null,
+  faucet: !!NEAR?.usdcFaucet,
 }));
 app.get('/api/services', (c) => c.json(SERVICES.map(({ run, ...s }) => s)));
 app.get('/api/team', async (c) => {
@@ -78,7 +81,14 @@ app.post('/api/orders/:id/pay', async (c) => {
 app.post('/api/orders/:id/accept', async (c) => {
   const o = getOrder(c.req.param('id'));
   if (!o) return c.json({ error: 'not found' }, 404);
-  try { return c.json(view_(await accept(o))); } catch (e: any) { return c.json({ error: String(e?.message ?? e) }, 400); }
+  const b = await c.req.json().catch(() => ({}));
+  try { return c.json(view_(await accept(o, b.tx))); } catch (e: any) { return c.json({ error: String(e?.message ?? e) }, 400); }
+});
+app.post('/api/orders/:id/reject', async (c) => {
+  const o = getOrder(c.req.param('id'));
+  if (!o) return c.json({ error: 'not found' }, 404);
+  const b = await c.req.json().catch(() => ({}));
+  try { return c.json(view_(await rejected(o, b.tx))); } catch (e: any) { return c.json({ error: String(e?.message ?? e) }, 400); }
 });
 
 // Live events: everything, or one order's (with what already happened, so a late page catches up).

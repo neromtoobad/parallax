@@ -2,6 +2,8 @@
 // bills, canned model output. Without it the server needs deployments/near-<net>.json and the agents' keys.
 import { join } from 'node:path';
 
+/** Stand-in model answers while the chain is real: for testnet runs before there's a NEAR AI key. */
+export const CANNED = process.env.PARALLAX_CANNED_AI === '1';
 export const DRY = process.env.PARALLAX_DRY === '1';
 export const PORT = Number(process.env.PORT ?? 8790);
 export const DATA_DIR = process.env.PARALLAX_DATA ?? join(import.meta.dirname, '..', 'data');

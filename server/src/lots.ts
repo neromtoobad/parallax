@@ -165,7 +165,7 @@ async function commits(orderId: string, l: Open, team: Member[]) {
     if (!DRY && (await usdcOf(who).catch(() => 0)) < l.cost) { say(orderId, { phase: 'pass', lot: l.id, agent, role, why: "can't cover the model bill yet" }); return; }
     const salt = randomBytes(8).toString('hex');
     try {
-      if (!DRY) await call(who, NEAR!.bank, 'commit', { lot: l.id, hash: sha256(`${l.id}:${who}:${toUnits(price)}:${salt}`) }, { tgas: 30 });
+      if (!DRY) await call(who, NEAR!.bank, 'commit', { lot: l.id, hash: sha256(`${l.id}:${who}:${toUnits(price)}:${salt}`) }, { tgas: 12 });
       l.salts.set(who, { price, salt });
       say(orderId, { phase: 'commit', lot: l.id, agent, role });
     } catch (e: any) {
@@ -181,7 +181,7 @@ async function revealAndAward(orderId: string, lots: Open[], team: Member[], map
   await Promise.all(lots.flatMap((l) => [...l.salts].map(async ([who, b]) => {
     const role = byAccount.get(who)!.role, agent = agentName(who);
     try {
-      if (!DRY) await call(who, NEAR!.bank, 'reveal', { lot: l.id, price: toUnits(b.price), salt: b.salt }, { tgas: 30 });
+      if (!DRY) await call(who, NEAR!.bank, 'reveal', { lot: l.id, price: toUnits(b.price), salt: b.salt }, { tgas: 12 });
       l.bids.push({ agent: who, role, price: b.price });
       say(orderId, { phase: 'reveal', lot: l.id, agent, role, price: b.price });
     } catch (e: any) {
@@ -240,7 +240,7 @@ export async function closeLots(orderId: string, lots: LotRecord[], job: Job | a
     try {
       if (!DRY) {
         if (String(l.winner).startsWith('outside:')) await call(NEAR!.cfo, NEAR!.bank, 'deliver_outside', { lot: l.id, deliverable: part, receipt: l.hire?.receipt ?? '' });
-        else await call(l.winner!, NEAR!.bank, 'deliver', { lot: l.id, deliverable: part }, { tgas: 30 });
+        else await call(l.winner!, NEAR!.bank, 'deliver', { lot: l.id, deliverable: part }, { tgas: 12 });
         l.tx = (await call(NEAR!.cfo, NEAR!.bank, 'inspect', { lot: l.id, pass, note })).hash;
       }
       l.status = pass ? 'passed' : 'failed';

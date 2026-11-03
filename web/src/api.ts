@@ -15,7 +15,7 @@ export type Receipt = { at: string; agent: string; vendor: string; usd: number; 
 export type Lead = { name: string; kind: string; address: string; website?: string; phone?: string; email?: string; osm: string; fit: number; why: string; opener: string; note?: string };
 export type Order = {
   id: string; service: string; input?: Record<string, string>; brief?: string; priceUsd: number; customer: string;
-  state: 'quoted' | 'funded' | 'bidding' | 'working' | 'delivered' | 'accepted' | 'failed';
+  state: 'quoted' | 'funded' | 'bidding' | 'working' | 'delivered' | 'accepted' | 'rejected' | 'failed';
   createdAt: string; txs: { what: string; hash: string; url: string }[]; lots: Lot[]; steps: Step[]; receipt: Receipt[];
   delivery?: {
     summary: string; check: { pass: boolean; notes: string[] };
@@ -24,7 +24,10 @@ export type Order = {
   };
   error?: string;
 };
-export type Info = { mode: string; model: string; bank: string | null; explorer: string | null; usdc: string | null; search: boolean };
+export type Info = {
+  mode: string; model: string; bank: string | null; explorer: string | null; usdc: string | null; search: boolean;
+  canned: boolean; house: string | null; faucet: boolean;
+};
 export type Event = { type: string; orderId?: string; data: any; at: number };
 
 async function req<T>(path: string, body?: unknown): Promise<T> {
@@ -39,9 +42,10 @@ export const api = {
   team: () => req<Agent[]>('/api/team'),
   orders: () => req<{ id: string; service: string; state: string; priceUsd: number; createdAt: string }[]>('/api/orders'),
   order: (id: string) => req<Order>(`/api/orders/${id}`),
-  quote: (service: string, input: Record<string, string>) => req<Order>('/api/orders', { service, input }),
-  pay: (id: string) => req<Order>(`/api/orders/${id}/pay`, { wallet: 'demo' }),
-  accept: (id: string) => req<Order>(`/api/orders/${id}/accept`, {}),
+  quote: (service: string, input: Record<string, string>, customer?: string) => req<Order>('/api/orders', { service, input, customer }),
+  pay: (id: string, wallet: 'demo' | 'own' = 'demo') => req<Order>(`/api/orders/${id}/pay`, { wallet }),
+  accept: (id: string, tx?: string) => req<Order>(`/api/orders/${id}/accept`, { tx }),
+  reject: (id: string, tx?: string) => req<Order>(`/api/orders/${id}/reject`, { tx }),
 };
 
 /** Load once. */
