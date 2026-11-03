@@ -1,4 +1,4 @@
-//! One test per rule in RULES.md.
+//! Tests named after the rules in RULES.md: rule_<n>_... checks rule n, so `cargo test` reads as the rule list.
 
 use super::*;
 use near_sdk::test_utils::{get_logs, VMContextBuilder};
@@ -83,7 +83,7 @@ fn b(s: &Parallax, k: Bucket) -> u128 {
 }
 
 #[test]
-fn deposits_land_in_operating_and_policy_moves_them() {
+fn rule_01_deposits_land_in_operating_and_policy_moves_them() {
     let s = setup();
     assert_eq!(b(&s, Bucket::Operating), 10 * D);
     assert_eq!(b(&s, Bucket::Bond), 10 * D);
@@ -92,14 +92,14 @@ fn deposits_land_in_operating_and_policy_moves_them() {
 
 #[test]
 #[should_panic(expected = "over max_move")]
-fn cfo_cannot_move_more_than_max_move() {
+fn rule_02_cfo_cannot_move_more_than_max_move() {
     let mut s = setup();
     at("cfo.testnet", 0);
     s.move_funds(Bucket::Operating, Bucket::Tools, U128(6 * D), "too much".into());
 }
 
 #[test]
-fn bigger_moves_need_the_owner() {
+fn rule_02_bigger_moves_need_the_owner() {
     let mut s = setup();
     at("cfo.testnet", 0);
     let id = s.propose(Kind::Move { from: Bucket::Operating, to: Bucket::Tools }, None, U128(8 * D), "big week".into());
@@ -110,7 +110,7 @@ fn bigger_moves_need_the_owner() {
 
 #[test]
 #[should_panic(expected = "below the reserve floor")]
-fn reserve_floor_holds() {
+fn rule_03_reserve_floor_holds() {
     let mut s = setup();
     at("cfo.testnet", 0);
     s.move_funds(Bucket::Reserve, Bucket::Operating, U128(4 * D), "raid".into());
@@ -118,7 +118,7 @@ fn reserve_floor_holds() {
 
 #[test]
 #[should_panic(expected = "only the CFO")]
-fn agents_cannot_move_money() {
+fn rule_02_agents_cannot_move_money() {
     let mut s = setup();
     at("writer.testnet", 0);
     s.move_funds(Bucket::Operating, Bucket::Tools, U128(D), "mine".into());
@@ -126,7 +126,7 @@ fn agents_cannot_move_money() {
 
 #[test]
 #[should_panic(expected = "over the epoch tool budget")]
-fn allowances_stay_inside_the_weekly_budget() {
+fn rule_05_allowances_stay_inside_the_weekly_budget() {
     let mut s = setup();
     at("cfo.testnet", 0);
     s.set_allowance(acc("writer.testnet"), U128(6 * D));
@@ -134,7 +134,7 @@ fn allowances_stay_inside_the_weekly_budget() {
 }
 
 #[test]
-fn top_up_pays_the_agent_from_tools() {
+fn rule_05_top_up_pays_the_agent_from_tools() {
     let mut s = setup();
     at("cfo.testnet", 0);
     s.set_allowance(acc("writer.testnet"), U128(2 * D));
@@ -145,7 +145,7 @@ fn top_up_pays_the_agent_from_tools() {
 
 #[test]
 #[should_panic(expected = "over allowance")]
-fn top_up_stays_inside_the_allowance() {
+fn rule_05_top_up_stays_inside_the_allowance() {
     let mut s = setup();
     at("cfo.testnet", 0);
     s.set_allowance(acc("writer.testnet"), U128(D));
@@ -154,7 +154,7 @@ fn top_up_stays_inside_the_allowance() {
 
 #[test]
 #[should_panic(expected = "the kill switch is on")]
-fn kill_switch_stops_the_cfo() {
+fn rule_06_kill_switch_stops_the_cfo() {
     let mut s = setup();
     at("boss.testnet", 0);
     s.set_killed(true);
@@ -163,7 +163,7 @@ fn kill_switch_stops_the_cfo() {
 }
 
 #[test]
-fn kill_switch_still_lets_customers_reject() {
+fn rule_06_kill_switch_still_lets_customers_reject() {
     let mut s = setup();
     funded(&mut s, "j1");
     at("cfo.testnet", 10);
@@ -176,7 +176,7 @@ fn kill_switch_still_lets_customers_reject() {
 }
 
 #[test]
-fn funding_takes_exactly_the_price_and_returns_extra() {
+fn rule_08_funding_takes_exactly_the_price_and_returns_extra() {
     let mut s = setup();
     at("cfo.testnet", 0);
     s.open_job("j1".into(), acc("ada.testnet"), U128(2 * D), U128(0), "spec".into(), 3_600, 7_200);
@@ -188,14 +188,14 @@ fn funding_takes_exactly_the_price_and_returns_extra() {
 
 #[test]
 #[should_panic(expected = "BOND can't cover this bond")]
-fn every_bond_is_covered_when_quoted() {
+fn rule_07_every_bond_is_covered_when_quoted() {
     let mut s = setup();
     at("cfo.testnet", 0);
     s.open_job("j1".into(), acc("ada.testnet"), U128(50 * D), U128(11 * D), "spec".into(), 3_600, 7_200);
 }
 
 #[test]
-fn rejection_refunds_the_price_and_pays_the_bond() {
+fn rule_12_rejection_refunds_the_price_and_pays_the_bond() {
     let mut s = setup();
     funded(&mut s, "j1");
     at("cfo.testnet", 10);
@@ -209,7 +209,7 @@ fn rejection_refunds_the_price_and_pays_the_bond() {
 
 #[test]
 #[should_panic(expected = "only the customer")]
-fn only_the_customer_accepts() {
+fn rule_10_only_the_customer_accepts() {
     let mut s = setup();
     funded(&mut s, "j1");
     at("cfo.testnet", 10);
@@ -218,7 +218,7 @@ fn only_the_customer_accepts() {
 }
 
 #[test]
-fn silence_releases_after_the_window() {
+fn rule_11_silence_releases_after_the_window() {
     let mut s = setup();
     funded(&mut s, "j1");
     at("cfo.testnet", 10);
@@ -229,7 +229,7 @@ fn silence_releases_after_the_window() {
 }
 
 #[test]
-fn late_delivery_is_refunded_by_anyone() {
+fn rule_12_late_delivery_is_refunded_by_anyone() {
     let mut s = setup();
     funded(&mut s, "j1");
     at("anyone.testnet", 7_201);
@@ -238,7 +238,7 @@ fn late_delivery_is_refunded_by_anyone() {
 }
 
 #[test]
-fn one_revision_then_deliver_again() {
+fn rule_10_one_revision_then_deliver_again() {
     let mut s = setup();
     funded(&mut s, "j1");
     at("cfo.testnet", 10);
@@ -252,7 +252,7 @@ fn one_revision_then_deliver_again() {
 
 #[test]
 #[should_panic(expected = "lot reserves would eat the margin")]
-fn lots_leave_the_minimum_margin() {
+fn rule_14_lots_leave_the_minimum_margin() {
     let mut s = setup();
     funded(&mut s, "j1");
     at("cfo.testnet", 0);
@@ -261,7 +261,7 @@ fn lots_leave_the_minimum_margin() {
 }
 
 #[test]
-fn lowest_sealed_bid_wins_and_is_paid_the_runner_up_price() {
+fn rule_19_lowest_sealed_bid_wins_and_is_paid_the_runner_up_price() {
     let mut s = setup();
     funded(&mut s, "j1");
     at("cfo.testnet", 0);
@@ -279,7 +279,7 @@ fn lowest_sealed_bid_wins_and_is_paid_the_runner_up_price() {
 }
 
 #[test]
-fn an_agent_market_quote_can_win() {
+fn rule_18_an_agent_market_quote_can_win() {
     let mut s = setup();
     funded(&mut s, "j1");
     at("cfo.testnet", 0);
@@ -297,7 +297,7 @@ fn an_agent_market_quote_can_win() {
 
 #[test]
 #[should_panic(expected = "not this agent's kind of work")]
-fn lots_are_open_only_to_the_roles_named() {
+fn rule_15_lots_are_open_only_to_the_roles_named() {
     let mut s = setup();
     funded(&mut s, "j1");
     at("cfo.testnet", 0);
@@ -307,7 +307,7 @@ fn lots_are_open_only_to_the_roles_named() {
 
 #[test]
 #[should_panic(expected = "reveal does not match commit")]
-fn a_reveal_must_match_its_sealed_bid() {
+fn rule_17_a_reveal_must_match_its_sealed_bid() {
     let mut s = setup();
     funded(&mut s, "j1");
     at("cfo.testnet", 0);
@@ -317,7 +317,7 @@ fn a_reveal_must_match_its_sealed_bid() {
 }
 
 #[test]
-fn a_failed_lot_goes_back_up_without_the_seller() {
+fn rule_21_a_failed_lot_goes_back_up_without_the_seller() {
     let mut s = setup();
     funded(&mut s, "j1");
     at("cfo.testnet", 0);
@@ -338,7 +338,7 @@ fn a_failed_lot_goes_back_up_without_the_seller() {
 }
 
 #[test]
-fn acceptance_pays_winners_contributors_and_the_company() {
+fn rule_13_acceptance_pays_winners_contributors_and_the_company() {
     let mut s = setup();
     funded(&mut s, "j1");
     at("cfo.testnet", 0);
@@ -363,7 +363,7 @@ fn acceptance_pays_winners_contributors_and_the_company() {
 
 #[test]
 #[should_panic(expected = "a lot is still open")]
-fn a_job_cannot_be_delivered_with_open_lots() {
+fn rule_09_a_job_cannot_be_delivered_with_open_lots() {
     let mut s = setup();
     funded(&mut s, "j1");
     at("cfo.testnet", 0);
@@ -373,7 +373,7 @@ fn a_job_cannot_be_delivered_with_open_lots() {
 
 #[test]
 #[should_panic(expected = "would uncover bonds")]
-fn the_owner_cannot_withdraw_bond_cover() {
+fn rule_04_the_owner_cannot_withdraw_bond_cover() {
     let mut s = setup();
     funded(&mut s, "j1");
     at("boss.testnet", 0);
@@ -381,7 +381,7 @@ fn the_owner_cannot_withdraw_bond_cover() {
 }
 
 #[test]
-fn a_failed_payout_becomes_claimable() {
+fn rule_23_a_failed_payout_becomes_claimable() {
     let mut s = setup();
     testing_env!(VMContextBuilder::new()
         .current_account_id(acc("bank.parallax.testnet"))
@@ -392,4 +392,131 @@ fn a_failed_payout_becomes_claimable() {
     at("ada.testnet", 0);
     s.claim();
     assert_eq!(s.owed_to(acc("ada.testnet")).0, 0);
+}
+
+#[test]
+fn rule_16_a_sealed_bid_shows_no_price_until_revealed() {
+    let mut s = setup();
+    funded(&mut s, "j1");
+    at("cfo.testnet", 0);
+    let lot = s.open_lot("j1".into(), "copy".into(), vec![], U128(D));
+    bid(&mut s, lot, "writer.testnet", 300_123, 1);
+    let l = s.get_lot(lot).unwrap();
+    assert!(l.reveals.is_empty());
+    assert_eq!(l.commits[0].hash, commit_hash(lot, &acc("writer.testnet"), 300_123, "salt"));
+    assert!(!get_logs().iter().any(|x| x.contains("300123")));
+}
+
+#[test]
+#[should_panic(expected = "bid above reserve")]
+fn rule_17_a_reveal_above_the_reserve_is_refused() {
+    let mut s = setup();
+    funded(&mut s, "j1");
+    at("cfo.testnet", 0);
+    let lot = s.open_lot("j1".into(), "copy".into(), vec![], U128(D));
+    bid(&mut s, lot, "writer.testnet", 2 * D, 1);
+    reveal(&mut s, lot, "writer.testnet", 2 * D, 21);
+}
+
+#[test]
+fn rule_17_committing_without_revealing_costs_reputation() {
+    let mut s = setup();
+    funded(&mut s, "j1");
+    at("cfo.testnet", 0);
+    let lot = s.open_lot("j1".into(), "copy".into(), vec![], U128(D));
+    bid(&mut s, lot, "writer.testnet", 300_000, 1);
+    bid(&mut s, lot, "designer.testnet", 500_000, 2);
+    reveal(&mut s, lot, "designer.testnet", 500_000, 22);
+    at("anyone.testnet", 41);
+    s.award(lot);
+    assert_eq!(s.get_agent(acc("writer.testnet")).unwrap().rep, REP_START - REP_NO_REVEAL);
+    assert_eq!(s.get_agent(acc("designer.testnet")).unwrap().rep, REP_START);
+    assert_eq!(s.get_lot(lot).unwrap().winner, Some(Seller::Team(acc("designer.testnet"))));
+}
+
+#[test]
+fn rule_19_a_sole_bidder_is_paid_the_reserve() {
+    let mut s = setup();
+    funded(&mut s, "j1");
+    at("cfo.testnet", 0);
+    let lot = s.open_lot("j1".into(), "copy".into(), vec![], U128(D));
+    bid(&mut s, lot, "writer.testnet", 300_000, 1);
+    reveal(&mut s, lot, "writer.testnet", 300_000, 21);
+    at("anyone.testnet", 41);
+    s.award(lot);
+    let l = s.get_lot(lot).unwrap();
+    assert_eq!(l.bid.0, 300_000);
+    assert_eq!(l.pay.0, D);
+}
+
+#[test]
+fn rule_19_a_lot_nobody_bid_on_is_void_and_can_go_back_up() {
+    let mut s = setup();
+    funded(&mut s, "j1");
+    at("cfo.testnet", 0);
+    let lot = s.open_lot("j1".into(), "copy".into(), vec![], U128(D));
+    at("anyone.testnet", 41);
+    s.award(lot);
+    assert_eq!(s.get_lot(lot).unwrap().status, LotStatus::Void);
+    at("cfo.testnet", 50);
+    s.reopen(lot);
+    let l = s.get_lot(lot).unwrap();
+    assert_eq!(l.status, LotStatus::Bidding);
+    assert_eq!(l.round, 2);
+}
+
+#[test]
+#[should_panic(expected = "daily lot cap reached")]
+fn rule_20_lot_pay_stays_under_the_daily_cap() {
+    let mut s = setup();
+    at("boss.testnet", 0);
+    s.set_policy(Policy { daily_lot_cap: U128(D / 2), ..policy() });
+    funded(&mut s, "j1");
+    at("cfo.testnet", 0);
+    let lot = s.open_lot("j1".into(), "copy".into(), vec![], U128(D));
+    bid(&mut s, lot, "writer.testnet", 300_000, 1);
+    reveal(&mut s, lot, "writer.testnet", 300_000, 21);
+    at("anyone.testnet", 41);
+    s.award(lot); // a sole bidder is paid the reserve, 1 USDC, over the 0.5 cap
+}
+
+#[test]
+fn rule_21_a_pass_raises_the_winners_record() {
+    let mut s = setup();
+    funded(&mut s, "j1");
+    at("cfo.testnet", 0);
+    let lot = s.open_lot("j1".into(), "copy".into(), vec![], U128(D));
+    bid(&mut s, lot, "writer.testnet", 300_000, 1);
+    reveal(&mut s, lot, "writer.testnet", 300_000, 21);
+    at("anyone.testnet", 41);
+    s.award(lot);
+    at("writer.testnet", 50);
+    s.deliver(lot, "draft".into());
+    at("cfo.testnet", 60);
+    s.inspect(lot, true, "good".into());
+    let a = s.get_agent(acc("writer.testnet")).unwrap();
+    assert_eq!(a.rep, REP_START + REP_PASS);
+    assert_eq!(a.wins, 1);
+    assert_eq!(s.get_lot(lot).unwrap().status, LotStatus::Passed);
+}
+
+#[test]
+fn rule_22_a_rejected_job_pays_no_agent() {
+    let mut s = setup();
+    funded(&mut s, "j1");
+    at("cfo.testnet", 0);
+    let lot = s.open_lot("j1".into(), "copy".into(), vec![], U128(D));
+    bid(&mut s, lot, "writer.testnet", 300_000, 1);
+    reveal(&mut s, lot, "writer.testnet", 300_000, 21);
+    at("anyone.testnet", 41);
+    s.award(lot);
+    at("writer.testnet", 50);
+    s.deliver(lot, "draft".into());
+    at("cfo.testnet", 60);
+    s.inspect(lot, true, "good".into());
+    s.submit_job("j1".into(), "files".into());
+    at("ada.testnet", 70);
+    s.reject("j1".into());
+    assert_eq!(s.get_agent(acc("writer.testnet")).unwrap().earned.0, 0);
+    assert!(get_logs().iter().any(|l| l.contains("\"refund\":\"2000000\"")));
 }

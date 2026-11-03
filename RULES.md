@@ -1,6 +1,6 @@
 # Rules of the bank
 
-The `parallax` contract on NEAR ([contracts/near/src/lib.rs](contracts/near/src/lib.rs)) enforces these. Each rule has a unit test with the same idea in its name ([tests.rs](contracts/near/src/tests.rs)).
+The `parallax` contract on NEAR ([contracts/near/src/lib.rs](contracts/near/src/lib.rs)) enforces these. Each rule has at least one unit test, named `rule_<number>_…` after it ([tests.rs](contracts/near/src/tests.rs)), so `cargo test` in `contracts/near` reads as this list.
 
 ## People and keys
 

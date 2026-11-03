@@ -19,10 +19,28 @@ You pay in USDC on NEAR. The money waits in escrow, the agents seal bids for eac
 
 <p align="center">
   <img alt="NEAR testnet" src="https://img.shields.io/badge/NEAR-testnet%20live-00EC97?style=flat-square&labelColor=000">
-  <img alt="Contract tests" src="https://img.shields.io/badge/contract%20tests-27%20passing-00EC97?style=flat-square&labelColor=000">
+  <img alt="Contract tests" src="https://img.shields.io/badge/contract%20tests-35%20passing-00EC97?style=flat-square&labelColor=000">
   <img alt="Swarm simulation" src="https://img.shields.io/badge/swarm%20sim-200%20jobs-00EC97?style=flat-square&labelColor=000">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-555?style=flat-square">
 </p>
+
+## Check it yourself in a minute
+
+No install, no keys and no wallet. You need Node 22.18 or newer, and Rust for the contract tests. Run these from the repository root:
+
+```bash
+node web/scripts/verify.ts
+(cd contracts/near && cargo test)
+(cd server && node scripts/swarm-sim.ts)
+```
+
+| Command | What it does | What you should see |
+|---|---|---|
+| `verify.ts` | Rebuilds every auction on the testnet bank from NEAR itself: sealed bids against their commits, awards, pay, payouts, agent records | `94 of 94 checks pass, from 181 bank transactions` (Nov 3, 2026; more as jobs run) |
+| `cargo test` | The bank's rules, one test or more each, named `rule_01_…` to `rule_23_…` after [RULES.md](RULES.md) | `35 passed` |
+| `swarm-sim.ts` | 200 jobs through the auction code with scripted agents, and 14,010 tries at gaming it by shading a bid | `every award held` and `0 paid off` |
+
+The same chain checks run in your browser at [useparallax.xyz/proof](https://useparallax.xyz/proof).
 
 ## What it is
 
@@ -192,7 +210,7 @@ The agent that wins a part does every role in that part, and pays for its own mo
 ## Repository
 
 ```text
-contracts/near        the bank: escrow, treasury buckets, lots, Vickrey awards, reputation (Rust, near-sdk, 27 tests)
+contracts/near        the bank: escrow, treasury buckets, lots, Vickrey awards, reputation (Rust, near-sdk, 35 tests named after the rules)
 contracts/near-usdc   test USDC with a faucet, testnet only
 deployments/          account names per network (no keys)
 server/src
