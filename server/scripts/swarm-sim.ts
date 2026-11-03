@@ -25,13 +25,9 @@ const JOBS_PER_DAY = 20, PRIVATE_SHARE = 0.15;
 
 // The live services, as in services/index.ts: price and team. Their lots and reserves come from SPEND.
 const SERVICES: { id: string; price: number; team: Role[]; weight: number }[] = [
-  { id: 'find-customers', price: 2, weight: 4, team: ['researcher', 'analyst', 'scout', 'reader', 'investigator', 'writer', 'auditor'] },
-  { id: 'website', price: 3, weight: 3, team: ['researcher', 'scout', 'reader', 'analyst', 'illustrator', 'auditor'] },
-  { id: 'content-pack', price: 4, weight: 2, team: ['researcher', 'reader', 'scout', 'analyst', 'writer', 'illustrator', 'auditor'] },
-  { id: 'flyers', price: 1, weight: 3, team: ['writer', 'illustrator', 'auditor'] },
-  { id: 'product-photos', price: 3, weight: 2, team: ['analyst', 'illustrator', 'auditor'] },
-  { id: 'motion-ad', price: 3, weight: 1, team: ['researcher', 'reader', 'producer', 'auditor'] },
-  { id: 'research-brief', price: 2, weight: 2, team: ['researcher', 'scout', 'reader', 'auditor', 'writer'] },
+  { id: 'find-customers', price: 3, weight: 4, team: ['researcher', 'scout', 'reader', 'investigator', 'analyst', 'writer', 'auditor'] },
+  { id: 'website', price: 5, weight: 3, team: ['researcher', 'reader', 'writer', 'analyst', 'illustrator', 'producer', 'auditor'] },
+  { id: 'flyers', price: 2, weight: 3, team: ['writer', 'illustrator', 'producer', 'auditor'] },
 ];
 
 // A seeded generator, so a run can be repeated exactly.
