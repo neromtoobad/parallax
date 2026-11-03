@@ -164,6 +164,15 @@ table.leads td b{font-size:15px}
 .wr-pills span{background:var(--cyan-soft);color:var(--cyan-ink);border-radius:99px;padding:.35cqw 1cqw;font:600 max(9px,1.25cqw)/1.2 'Inter Tight',sans-serif;animation:pop .35s ease-out both}
 .wr-pills span.out{opacity:.55;text-decoration:line-through}
 .wr-desk{position:absolute;pointer-events:none}
+/* The lift car: its back (with the cable) under the riders, its glass doors over them, the floor slabs over both. */
+.wr-car{position:absolute;left:85.471%;width:6.816%;height:15.245%;z-index:5;pointer-events:none;border-radius:.3cqw;background:linear-gradient(90deg,rgba(18,24,26,.92),rgba(44,54,57,.9) 50%,rgba(18,24,26,.92));box-shadow:inset 0 -.55cqw 0 #c9d6d2,inset 0 .35cqw 0 #2a3335,inset 0 .9cqw 1.2cqw -0.6cqw rgba(170,255,225,.35)}
+.wr-car i{position:absolute;left:50%;bottom:100%;width:.18cqw;transform:translateX(-50%);background:#5d6a6d}
+.wr-car.front{z-index:7;background:none;box-shadow:inset 0 0 0 .22cqw #1c2325,0 0 .8cqw rgba(0,236,151,.25);overflow:hidden}
+.wr-car.front i{position:absolute;top:0;bottom:0;left:0;right:auto;width:50%;transform:translateX(calc(var(--open,0) * -100%));background:linear-gradient(90deg,rgba(190,240,225,.16),rgba(230,255,247,.3));border-right:.12cqw solid rgba(0,236,151,.7)}
+.wr-car.front i+i{left:50%;transform:translateX(calc(var(--open,0) * 100%));border-right:0;border-left:.12cqw solid rgba(0,236,151,.7)}
+.wr-slab{position:absolute;pointer-events:none;z-index:8}
+.wr-slab.s1{left:84.305%;top:39.020%;width:9.327%;height:3.448%}
+.wr-slab.s2{left:84.305%;top:67.151%;width:9.327%;height:3.448%}
 .wr-desk.back{left:18.117%;top:57.078%;width:63.318%;height:6.443%;z-index:2}
 .wr-desk.front{left:13.453%;top:59.619%;width:61.614%;height:7.804%;z-index:4}
 .wr-fig{position:absolute;width:0;height:0;display:flex;flex-direction:column;align-items:center;z-index:5}

@@ -26,7 +26,11 @@ const name = (id?: string) => (id ? NAMES[id] ?? id.replace(/^outside:/, '') : '
 // The stage picture is 1115 x 1102; everything below is in its pixels.
 const W = 1115, H = 1102;
 const FLOOR = [430, 740, 1040]; // the line the feet walk on: hall, desks, street
-const STAIR = 992;              // the stairwell on the right joins all three floors
+// A glass lift on the right joins all three floors. Its car (drawn by the page) holds four, at SLOTS from the middle;
+// people queue at `wait` to its left, and it passes behind the two floor slabs (design/scripts/lift.py).
+const LIFT = { x: 991, w: 76, h: 168, wait: 920, gap: 27, speed: 260, door: 0.35, dwell: 0.45 };
+const SLOTS = [18, -16, 3, -6];
+const SHAFT_TOP = 150;
 const SPEED = 150;              // walking speed, px per second, the same for every walk
 // One step (heel to heel) in the walk sheets is about 65 px of a 200 px figure, 40 px here; the cycle is four
 // frames over two steps, so each frame is held for half a step and the planted foot keeps still on the floor.
@@ -192,7 +196,7 @@ function fold(beats: Beat[]): Scene {
   return s;
 }
 
-type Pt = { x: number; y: number; floor: number };
+type Pt = { x: number; y: number; floor: number; lift?: number }; // `lift`: wait here for the car to that floor
 type Goal = Pt & { sit?: boolean; row?: Row };
 /** The desk row someone is walking or sitting behind, if any. */
 const rowAt = (p: Pt) => (p.floor === 1 ? (['back', 'front'] as Row[]).find((r) => Math.abs(p.y - ROWS[r].walk) < 1) : undefined);
@@ -214,23 +218,27 @@ function route(at: Pt, to: Goal): Pt[] {
   const from = out[out.length - 1] ?? at;
   const behindCounter = (p: Pt) => p.floor === 2 && p.y < FLOOR[2] - 10;
   if (behindCounter(from) && !behindCounter(to)) out.push({ x: COUNTER.past, y: FLOOR[2], floor: 2 });
-  if (from.floor !== to.floor) {
-    out.push({ x: STAIR, y: FLOOR[from.floor], floor: from.floor });
-    const d = to.floor > from.floor ? 1 : -1;
-    for (let f = from.floor + d; ; f += d) { out.push({ x: STAIR, y: FLOOR[f], floor: f }); if (f === to.floor) break; }
-  }
+  if (from.floor !== to.floor) out.push({ x: LIFT.wait, y: FLOOR[from.floor], floor: from.floor, lift: to.floor });
   if (behindCounter(to) && !behindCounter(from)) out.push({ x: COUNTER.past, y: FLOOR[2], floor: 2 });
   if (to.row) out.push({ x: ROWS[to.row].exit, y: FLOOR[1], floor: 1 }, { x: ROWS[to.row].exit, y: to.y, floor: 1 });
   out.push(to);
   return out;
 }
 
-type Body = Pt & { id: string; path: Pt[]; goal: Goal; face: 1 | -1; walked: number; seated: boolean; moving: boolean; pose?: Pose; busy: boolean; el?: HTMLDivElement | null; spr?: HTMLDivElement | null; lab?: HTMLElement | null };
+// A ride: waiting at the doors (queued at `qx`), stepping in to a slot, or on board.
+type Ride = { to: number; since: number; qx: number; board: boolean; on: boolean; slot: number };
+type Body = Pt & { id: string; path: Pt[]; goal: Goal; face: 1 | -1; walked: number; stepped: boolean; seated: boolean; moving: boolean; pose?: Pose; busy: boolean; ride?: Ride; el?: HTMLDivElement | null; spr?: HTMLDivElement | null; lab?: HTMLElement | null };
+type Car = { y: number; floor: number; state: 'shut' | 'opening' | 'open' | 'closing' | 'moving'; doors: number; from: number; to: number; p: number; dwell: number };
+const parked = (): Car => ({ y: FLOOR[1], floor: 1, state: 'shut', doors: 0, from: FLOOR[1], to: 1, p: 0, dwell: 0 });
+
 
 /** Everyone's position, moved every frame at one walking speed; React only says where each one should be. */
 class Crowd {
   bodies = new Map<string, Body>();
+  car = parked();
+  carEl?: { back: HTMLDivElement | null; front: HTMLDivElement | null; cable: HTMLElement | null };
   rush = 1;
+  private clock = 0;
   onArrive?: (id: string) => void;
   private raf = 0;
   private last = 0;
@@ -241,8 +249,9 @@ class Crowd {
     for (const id of ROSTER) {
       const g = goalOf(id, 'desk');
       const old = this.bodies.get(id);
-      this.bodies.set(id, { ...g, id, path: [], goal: g, face: g.x > BOARD ? -1 : 1, walked: 0, seated: !!g.sit, moving: false, busy: false, el: old?.el, spr: old?.spr, lab: old?.lab });
+      this.bodies.set(id, { ...g, id, path: [], goal: g, face: g.x > BOARD ? -1 : 1, walked: 0, stepped: false, seated: !!g.sit, moving: false, busy: false, el: old?.el, spr: old?.spr, lab: old?.lab });
     }
+    this.car = parked();
   }
 
   aim(id: string, p: Place, pose: Pose | undefined, busy: boolean) {
@@ -254,7 +263,16 @@ class Crowd {
     if (g.x === b.goal.x && g.y === b.goal.y && g.floor === b.goal.floor) { if (!b.path.length) b.seated = !!g.sit; b.goal = g; return; }
     b.goal = g;
     b.seated = false;
-    b.path = route(b, g);
+    const r = b.ride;
+    if (r && (r.on || r.board)) {
+      // already in the car: ride on to that floor, then head for the new goal from there
+      r.board = false; r.on = true;
+      const out = { x: LIFT.x, y: FLOOR[r.to], floor: r.to };
+      b.path = [{ ...out, lift: r.to }, ...route(out, g)];
+    } else {
+      b.ride = undefined;
+      b.path = route(b, g);
+    }
     b.moving = true;
   }
 
@@ -269,7 +287,10 @@ class Crowd {
     const loop = (t: number) => {
       const dt = this.last ? Math.min(0.05, (t - this.last) / 1000) : 0;
       this.last = t;
+      this.clock += dt;
+      this.runCar(dt);
       for (const b of this.bodies.values()) { this.step(b, dt); this.draw(b, t); }
+      this.drawCar();
       this.raf = requestAnimationFrame(loop);
     };
     this.raf = requestAnimationFrame(loop);
@@ -277,14 +298,32 @@ class Crowd {
 
   stop() { cancelAnimationFrame(this.raf); this.last = 0; }
 
+  /** Walk straight along the floor towards x, at walking speed; true once there. */
+  private shuffle(b: Body, x: number, dt: number) {
+    const dx = x - b.x, go = SPEED * this.rush * dt;
+    if (Math.abs(dx) < 0.5) return true;
+    b.face = dx > 0 ? 1 : -1;
+    const m = Math.min(Math.abs(dx), go);
+    b.x += Math.sign(dx) * m; b.walked += m; b.stepped = true;
+    return m === Math.abs(dx);
+  }
+
   private step(b: Body, dt: number) {
+    b.stepped = false;
+    const r = b.ride;
+    if (r?.on) { b.x = LIFT.x + SLOTS[r.slot]; b.y = this.car.y; b.floor = this.car.floor; b.face = -1; return; }
+    if (r?.board) { if (this.shuffle(b, LIFT.x + SLOTS[r.slot], dt)) { r.board = false; r.on = true; } return; }
+    if (r) { if (this.shuffle(b, r.qx, dt)) b.face = 1; return; }
     let left = SPEED * this.rush * dt;
     while (left > 0 && b.path.length) {
       const n = b.path[0];
       const dx = n.x - b.x, dy = n.y - b.y, d = Math.hypot(dx, dy);
       if (Math.abs(dx) > 0.5) b.face = dx > 0 ? 1 : -1;
+      b.stepped = true;
       if (d <= left) {
         b.x = n.x; b.y = n.y; b.floor = n.floor; b.walked += d; left -= d;
+        // at the lift doors: join the queue, and the car takes it from here
+        if (n.lift !== undefined) { b.ride = { to: n.lift, since: this.clock, qx: n.x, board: false, on: false, slot: -1 }; break; }
         b.path.shift();
       } else {
         b.x += (dx / d) * left; b.y += (dy / d) * left; b.walked += left; left = 0;
@@ -299,9 +338,62 @@ class Crowd {
     }
   }
 
+  /** The car: go where the first rider is going (or to the longest wait), open, let people out and in, close. */
+  private runCar(dt: number) {
+    const c = this.car, k = dt * this.rush, all = [...this.bodies.values()];
+    const inCar = all.filter((b) => b.ride && (b.ride.on || b.ride.board));
+    const queue = all.filter((b) => b.ride && !b.ride.on && !b.ride.board).sort((a, b) => a.ride!.since - b.ride!.since);
+    for (const f of [0, 1, 2]) queue.filter((b) => b.floor === f).forEach((b, i) => { b.ride!.qx = LIFT.wait - i * LIFT.gap; });
+    const here = c.state === 'moving' ? [] : queue.filter((b) => b.floor === c.floor);
+    const free = () => SLOTS.findIndex((_, i) => !all.some((b) => b.ride && (b.ride.on || b.ride.board) && b.ride.slot === i));
+    switch (c.state) {
+      case 'shut': {
+        const to = inCar.length ? inCar[0].ride!.to : queue[0]?.floor;
+        if (to === undefined) break;
+        if (to === c.floor) c.state = 'opening';
+        else Object.assign(c, { state: 'moving', from: c.y, to, p: 0 });
+        break;
+      }
+      case 'moving': {
+        c.p = Math.min(1, c.p + (k * LIFT.speed) / Math.abs(FLOOR[c.to] - c.from));
+        c.y = c.from + (FLOOR[c.to] - c.from) * c.p * c.p * (3 - 2 * c.p);
+        c.floor = FLOOR.reduce((best, y, i) => (Math.abs(y - c.y) < Math.abs(FLOOR[best] - c.y) ? i : best), 0);
+        if (c.p >= 1) { c.floor = c.to; c.state = 'opening'; }
+        break;
+      }
+      case 'opening':
+        c.doors = Math.min(1, c.doors + k / LIFT.door);
+        if (c.doors < 1) break;
+        c.state = 'open'; c.dwell = 0;
+        for (const b of inCar) if (b.ride!.on && b.ride!.to === c.floor) { b.ride = undefined; b.path.shift(); b.y = FLOOR[c.floor]; b.floor = c.floor; }
+        break;
+      case 'open': {
+        c.dwell += k;
+        for (const b of here) { const s = free(); if (s < 0) break; Object.assign(b.ride!, { board: true, slot: s }); }
+        // wait for anyone still stepping in, or still stepping out through the doors
+        const busy = all.some((b) => b.ride?.board || (!b.ride && b.floor === c.floor && b.y === FLOOR[c.floor] && b.x > LIFT.x - LIFT.w / 2 - 6));
+        if (c.dwell > LIFT.dwell && !busy) c.state = 'closing';
+        break;
+      }
+      case 'closing':
+        if (here.length && free() >= 0) { c.state = 'opening'; break; }
+        c.doors = Math.max(0, c.doors - k / LIFT.door);
+        if (c.doors <= 0) c.state = 'shut';
+    }
+  }
+
+  private drawCar() {
+    const e = this.carEl, c = this.car;
+    if (!e?.back || !e.front) return;
+    const top = c.y - LIFT.h;
+    for (const el of [e.back, e.front]) { el.style.top = `${(top / H) * 100}%`; }
+    if (e.cable) e.cable.style.height = cq(top - SHAFT_TOP);
+    e.front.style.setProperty('--open', String(c.doors));
+  }
+
   private draw(b: Body, t: number) {
     if (!b.el || !b.spr) return;
-    const moving = b.path.length > 0;
+    const moving = b.stepped;
     let frame: (typeof FRAMES)[number] = 'idle', lift = 0;
     if (moving) {
       // The passing frames stand taller than the contact ones, so the head already rises and falls with each step;
@@ -316,7 +408,8 @@ class Crowd {
       frame = glance ? 'look' : 'type';
       if (frame === 'type') lift = Math.sin(t / 55) > 0 ? 0.9 : 0;
     } else {
-      frame = b.pose ?? 'idle';
+      // waiting for the lift or riding it, stand easy (the parcel stays in hand)
+      frame = b.ride && b.pose !== 'box' ? 'idle' : b.pose ?? 'idle';
       if (frame === 'cheer') lift = Math.abs(Math.sin(t / 160)) * 6;
       else lift = Math.sin(t / 700 + b.goal.x) * 0.6; // breathing
     }
@@ -326,10 +419,12 @@ class Crowd {
     const behind = b.floor === 2 && b.y < FLOOR[2] - 10;
     b.el.style.left = `${(b.x / W) * 100}%`;
     b.el.style.top = `${(y / H) * 100}%`;
-    b.el.style.zIndex = row ? String(ROWS[row].z) : behind ? '3' : '5';
+    const riding = !!(b.ride?.on || b.ride?.board);
+    b.el.style.zIndex = riding ? '6' : row ? String(ROWS[row].z) : behind ? '3' : '5';
     b.el.classList.toggle('sit', sitting);
     if (b.lab) {
-      // the name sits on the desk front while someone is behind it, under the feet otherwise
+      // the name sits on the desk front while someone is behind it, under the feet otherwise, and not in the lift
+      b.lab.style.visibility = riding ? 'hidden' : '';
       b.lab.style.left = b.el.style.left;
       b.lab.style.top = `${((row ? ROWS[row].top + 5 : b.y + 6) / H) * 100}%`;
     }
@@ -437,6 +532,10 @@ export function Workroom({ o, lots, steps, live }: { o: Order; lots: LiveLot[]; 
         {ROSTER.map((id) => (
           <Figure key={id} id={id} crowd={crowd} tag={scene.tag[id]} glow={scene.glow.has(id)} bubble={scene.bubble?.who === id ? scene.bubble : undefined} />
         ))}
+        <div className="wr-car" ref={(el) => { crowd.carEl = { ...crowd.carEl!, back: el }; }}><i ref={(el) => { crowd.carEl = { ...crowd.carEl!, cable: el }; }} /></div>
+        <div className="wr-car front" ref={(el) => { crowd.carEl = { ...crowd.carEl!, front: el }; }}><i /><i /></div>
+        <img className="wr-slab s1" src="/stage-slab-1.webp" alt="" />
+        <img className="wr-slab s2" src="/stage-slab-2.webp" alt="" />
         <img className="wr-counter" src="/stage-counter.png" alt="" />
         {scene.place.messenger === 'street' && kitIn && !scene.end && <span className="wr-parcel">Your work, boxed</span>}
         {coins.map(([id, pay], i) => <Coin key={`${run}-${id}`} to={goalOf(id, 'desk')} pay={pay} delay={500 + i * 220} />)}
