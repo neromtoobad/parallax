@@ -1,0 +1,13 @@
+{
+  "reserve_floor": "5000000",
+  "max_move": "5000000",
+  "epoch_tool_budget": "10000000",
+  "promo_cap": "0",
+  "daily_lot_cap": "20000000",
+  "min_margin_bps": 2000,
+  "contributors_bps": 1000,
+  "accept_secs": 172800,
+  "revision_secs": 86400,
+  "commit_secs": 45,
+  "reveal_secs": 45
+}
