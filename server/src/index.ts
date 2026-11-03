@@ -1,0 +1,88 @@
+// The Parallax server: the API the site uses, a live event stream, the websites the team builds, and
+// the built site itself.
+import { existsSync, readFileSync } from 'node:fs';
+import { serve } from '@hono/node-server';
+import { serveStatic } from '@hono/node-server/serve-static';
+import { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
+import { relative } from 'node:path';
+import { DRY, MODEL, PORT, WEB_DIR } from './config.ts';
+import { backlog, bus, type Event } from './bus.ts';
+import { accept, fund, getOrder, listOrders, quote, sitePath, type Order } from './orders.ts';
+import { SERVICES } from './services/index.ts';
+import { ROSTER } from './wallets.ts';
+import { NEAR, accountUrl, view } from './near/chain.ts';
+import { registerSearch, searchOn } from './market.ts';
+import { accountOf } from './wallets.ts';
+
+registerSearch();
+const app = new Hono();
+
+/** What the site may see of an order: the brief stays with the customer if the order is private. */
+const view_ = (o: Order) => ({ ...o, input: o.private ? undefined : o.input, brief: o.private ? undefined : o.brief });
+
+app.get('/api/info', (c) => c.json({
+  mode: DRY ? 'demo' : NEAR?.network, model: MODEL, bank: NEAR?.bank ?? null, explorer: NEAR?.explorer ?? null,
+  usdc: NEAR?.usdc ?? null, search: searchOn(),
+}));
+app.get('/api/services', (c) => c.json(SERVICES.map(({ run, ...s }) => s)));
+app.get('/api/team', async (c) => {
+  const onChain = NEAR ? await view<[string, { role: string; active: boolean; rep: number; delivered?: number; failed?: number }][]>(NEAR.bank, 'list_agents').catch(() => []) : [];
+  const rec = new Map(onChain);
+  return c.json(ROSTER.map((a) => {
+    const account = accountOf(a.id), r = rec.get(account);
+    return { ...a, account, url: NEAR ? accountUrl(account) : null, rep: r?.rep ?? 500, active: r?.active ?? true };
+  }));
+});
+app.get('/api/orders', (c) => c.json(listOrders(30).filter((o) => !o.private).map((o) => ({
+  id: o.id, service: o.service, state: o.state, priceUsd: o.priceUsd, createdAt: o.createdAt,
+  lots: o.lots.map((l) => ({ title: l.title, winner: l.winner, pay: l.pay, bids: l.bids.length + (l.quotes?.filter((q) => q.entered).length ?? 0), status: l.status })),
+}))));
+app.get('/api/orders/:id', (c) => {
+  const o = getOrder(c.req.param('id'));
+  return o ? c.json(view_(o)) : c.json({ error: 'not found' }, 404);
+});
+app.post('/api/orders', async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  try {
+    const o = await quote(String(b.service ?? ''), b.input ?? {}, b.customer, !!b.private);
+    return c.json(view_(o));
+  } catch (e: any) { return c.json({ error: String(e?.message ?? e) }, 400); }
+});
+app.post('/api/orders/:id/pay', async (c) => {
+  const o = getOrder(c.req.param('id'));
+  if (!o) return c.json({ error: 'not found' }, 404);
+  const b = await c.req.json().catch(() => ({}));
+  try { return c.json(view_(await fund(o, b.wallet !== 'own'))); } catch (e: any) { return c.json({ error: String(e?.message ?? e) }, 400); }
+});
+app.post('/api/orders/:id/accept', async (c) => {
+  const o = getOrder(c.req.param('id'));
+  if (!o) return c.json({ error: 'not found' }, 404);
+  try { return c.json(view_(await accept(o))); } catch (e: any) { return c.json({ error: String(e?.message ?? e) }, 400); }
+});
+
+// Live events: everything, or one order's (with what already happened, so a late page catches up).
+app.get('/api/events', (c) => streamSSE(c, async (s) => {
+  const only = c.req.query('order');
+  const send = (e: Event) => s.writeSSE({ data: JSON.stringify(e) }).catch(() => {});
+  for (const e of backlog(only)) await send(e);
+  const on = (e: Event) => { if (!only || e.orderId === only) void send(e); };
+  bus.on('event', on);
+  const ping = setInterval(() => void s.writeSSE({ event: 'ping', data: '' }).catch(() => {}), 20_000);
+  await new Promise<void>((done) => s.onAbort(() => { bus.off('event', on); clearInterval(ping); done(); }));
+}));
+
+// Websites the team built.
+app.get('/sites/:id/', (c) => {
+  const f = sitePath(c.req.param('id'));
+  return /^[a-z0-9]+$/.test(c.req.param('id')) && existsSync(f) ? c.html(readFileSync(f, 'utf8')) : c.notFound();
+});
+
+// The site (built web app), with the single-page fallback.
+if (existsSync(WEB_DIR)) {
+  const root = relative(process.cwd(), WEB_DIR);
+  app.use('/*', serveStatic({ root }));
+  app.get('*', serveStatic({ root, path: 'index.html' }));
+}
+
+serve({ fetch: app.fetch, port: PORT }, () => console.log(`parallax on :${PORT} (${DRY ? 'demo mode' : NEAR?.network ?? 'no deployment'})`));

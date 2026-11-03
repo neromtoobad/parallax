@@ -84,9 +84,9 @@ export async function buy<T>(
   }
 
   if (DRY) {
-    // test hook: OUTLAY_DRY_FAIL="NEAR AI" makes that vendor fail like a provider that is down
-    if (process.env.OUTLAY_DRY_FAIL && opts.vendor.includes(process.env.OUTLAY_DRY_FAIL)) throw new Error('provider unavailable, please retry');
-    const delay = Number(process.env.OUTLAY_DRY_DELAY ?? 0);
+    // test hook: PARALLAX_DRY_FAIL="NEAR AI" makes that vendor fail like a provider that is down
+    if (process.env.PARALLAX_DRY_FAIL && opts.vendor.includes(process.env.PARALLAX_DRY_FAIL)) throw new Error('provider unavailable, please retry');
+    const delay = Number(process.env.PARALLAX_DRY_DELAY ?? 0);
     if (delay) await sleep(delay * (0.6 + Math.random() * 0.8));
     const data = opts.dryData();
     job.addReceipt({
