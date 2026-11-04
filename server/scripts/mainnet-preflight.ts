@@ -61,15 +61,15 @@ const meta = await view<{ symbol: string; decimals: number }>(USDC, 'ft_metadata
 const bounds = await view<{ min: string }>(USDC, 'storage_balance_bounds');
 if (bounds) ok(`registering an account costs ${(Number(bounds.min) / 1e24).toFixed(5)} NEAR`);
 const policy = JSON.parse(readFileSync(join(REPO, 'contracts/near/policy-mainnet.json'), 'utf8'));
-const capital = (Number(policy.reserve_floor) + Number(policy.epoch_tool_budget)) / 1e6 + 5; // + a few jobs' bonds
+const week = (Number(policy.reserve_floor) + Number(policy.epoch_tool_budget)) / 1e6; // reserve floor + a week of top-ups
 const usdc = root ? Number((await view<string>(USDC, 'ft_balance_of', { account_id: ROOT })) ?? 0) / 1e6 : 0;
-(usdc >= capital ? ok : warn)(`${ROOT} holds ${usdc} USDC. After the deploy, deposit about ${capital} into the bank (reserve floor, a week of tools, bond cover); not needed to deploy`);
+(usdc >= 3 ? ok : warn)(`${ROOT} holds ${usdc} USDC. After the deploy, deposit about 3 into the bank to start (${week} covers a full week of top-ups); not needed to deploy`);
 
 console.log('\nBuild and tools');
 const wasm = join(REPO, 'contracts/near/target/near/parallax_near.wasm');
 if (existsSync(wasm)) {
   const kb = statSync(wasm).size / 1000;
-  ok(`bank contract built: ${kb.toFixed(0)} KB, about ${(kb / 100).toFixed(1)} NEAR of storage (bank.${ROOT} starts with 4.5)`);
+  ok(`bank contract built: ${kb.toFixed(0)} KB, about ${(kb / 100).toFixed(1)} NEAR of storage (bank.${ROOT} starts with 3.6)`);
 } else warn('contract not built yet; deploy.sh builds it (cargo near build)');
 (has('near', ['--version']) ? ok : bad)('near-cli-rs');
 (has('cargo', ['near', '--version']) ? ok : bad)('cargo-near');
