@@ -26,6 +26,8 @@ export type Order = {
   lots: LotRecord[]; steps: Step[]; receipt: ReceiptLine[];
   delivery?: Omit<Delivery, 'site'> & { site?: { path: string } };
   error?: string; private?: boolean;
+  /** The bank refunded it after the delivery deadline. */
+  refunded?: boolean;
 };
 
 const dir = () => join(DATA_DIR, 'orders');
@@ -171,4 +173,21 @@ async function jobState(id: string, want: string): Promise<string | undefined> {
     await new Promise((r) => setTimeout(r, 1500));
   }
   return s;
+}
+
+/** A job the team didn't deliver by its deadline (it failed, or the server stopped mid-run): the bank refunds
+ *  the full price and the bond (RULES.md 12). refund_late is open to anyone; the CFO calls it in its round. */
+export async function refundLate(): Promise<string[]> {
+  if (DRY || !NEAR) return [];
+  const did: string[] = [];
+  for (const o of listOrders(200).filter((o) => ['funded', 'bidding', 'working', 'failed'].includes(o.state) && !o.refunded)) {
+    const j = await view<{ state: string; deliver_by: string }>(NEAR.bank, 'get_job', { id: o.id }).catch(() => undefined);
+    if (!j || j.state !== 'Funded' || Date.now() * 1e6 <= Number(j.deliver_by)) continue;
+    tx(o, 'Not delivered in time; the full price refunded', (await call(NEAR.cfo, NEAR.bank, 'refund_late', { id: o.id }, { tgas: 60 })).hash);
+    o.refunded = true;
+    if (o.state !== 'failed') { o.state = 'failed'; o.error = 'The team did not deliver in time.'; }
+    save(o);
+    did.push(`refunded job ${o.id}: not delivered by its deadline`);
+  }
+  return did;
 }

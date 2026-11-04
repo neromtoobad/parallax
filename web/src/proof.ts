@@ -160,7 +160,8 @@ export async function verify(raw: Raw, tamper = false): Promise<Proof> {
   const calls = raw.calls.filter((c) => c.ok);
   const { rep: reps, at: repAt, bps: shares } = replay(calls);
   let tampered = !tamper;
-  type Laid = Round & { award: Ev & { call: Call } };
+  // `fail` is the failed inspection after this round's award, if any: the contract put the lot back up for bids.
+  type Laid = Round & { award: Ev & { call: Call }; fail?: Ev & { call: Call } };
   const jobs: (JobProof & { rounds: Laid[] })[] = [];
   const opened = calls.filter((c) => c.method === 'open_job').map((c) => c.args.id as string);
   const order = [...raw.jobs].sort((a, b) => opened.indexOf(b.id) - opened.indexOf(a.id));
@@ -189,7 +190,8 @@ export async function verify(raw: Raw, tamper = false): Promise<Proof> {
           const bid = { seller, outside: true, price: BigInt(ob.args.price), q: BigInt(ob.args.quality_bps), revealTx: ob.tx };
           if (at >= 0) bids[at] = bid; else bids.push(bid);
         }
-        rounds.push({ lot, n: n + 1, bids, pay: 0n, payNote: '', checks, awardTx: award.call.tx, award });
+        const fail = mine('fail').find((e) => e.block > award.block && !awards.some((x) => x.block > award.block && x.block < e.block));
+        rounds.push({ lot, n: n + 1, bids, pay: 0n, payNote: '', checks, awardTx: award.call.tx, award, fail });
       });
     }
     jobs.push({ job, outcome: '', rounds, checks: [] });
@@ -229,7 +231,12 @@ export async function verify(raw: Raw, tamper = false): Promise<Proof> {
       checks.push({ ok: sellerOf(ev.winner) === (w?.seller ?? ''), what: 'Winner', detail: `rebuilt: ${w?.seller ?? 'nobody'}; the contract awarded ${sellerOf(ev.winner)}`, tx: award.call.tx });
       checks.push({ ok: BigInt(ev.pay) === r.pay, what: 'Pay', detail: `rebuilt: ${r.pay} (${r.payNote}); the contract set ${ev.pay}`, tx: award.call.tx });
       if (r === (jp.rounds.filter((x) => x.lot.id === lot.id).pop())) {
-        checks.push({
+        if (r.fail) checks.push({
+          ok: lot.round === Number(r.fail.data.round) && !lot.winner && lot.status !== 'Passed',
+          what: 'Stored lot', detail: `lot ${lot.id} failed inspection, so the contract put it back up for round ${r.fail.data.round}; on the contract today: round ${lot.round}, ${lot.status}, no winner`,
+          tx: r.fail.call.tx,
+        });
+        else checks.push({
           ok: sellerOf(lot.winner) === sellerOf(ev.winner) && lot.pay === ev.pay && lot.bid === ev.bid,
           what: 'Stored lot', detail: `lot ${lot.id} on the contract today: won by ${sellerOf(lot.winner)}, bid ${lot.bid}, pay ${lot.pay}, ${lot.status}`,
         });

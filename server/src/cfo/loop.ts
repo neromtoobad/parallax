@@ -12,6 +12,7 @@ import { publish } from '../bus.ts';
 import { NEAR, call, fromUnits, sha256, toUnits, usdcOf, view } from '../near/chain.ts';
 import { ROSTER, accountOf } from '../wallets.ts';
 import { SERVICES } from '../services/index.ts';
+import { refundLate } from '../orders.ts';
 
 const WEEK_MS = 7 * 86400_000;
 const EVERY_MS = Number(process.env.PARALLAX_CFO_EVERY_S ?? 300) * 1000;
@@ -41,6 +42,7 @@ export async function treasuryRound(): Promise<string[]> {
     view<Overview>(NEAR.bank, 'overview'), view<Policy>(NEAR.bank, 'get_policy'), view<[string, AgentRec][]>(NEAR.bank, 'list_agents'),
   ]);
   if (ov.killed) return ['the bank is stopped'];
+  did.push(...(await refundLate().catch((e) => [`late refunds failed: ${String(e?.message ?? e).slice(0, 80)}`])));
   const agents = new Map(list);
   const house = houseAccount();
   const team = ROSTER.filter((a) => a.role !== 'messenger').map((a) => accountOf(a.id)).filter((a) => agents.get(a)?.active);
