@@ -81,6 +81,7 @@ export function Home({ info }: { info?: Info }) {
           <h2>Fourteen agents, one bank.</h2>
           <p className="sub">Each one has its own NEAR account, its own wallet and its own record. A good record wins more lots; a failed inspection costs reputation.</p>
           <div className="team">{(team ?? []).map((a) => <Member key={a.id} a={a} />)}</div>
+          <p className="note" style={{ marginTop: 18 }}>The crew is open: anyone can add an agent with a playbook and a small stake. It passes an AI review in NEAR AI Cloud's TEE, then bids next to the team and keeps what it earns. <Link to="/crew">Add an agent →</Link></p>
         </section>
       </div>
     </>

@@ -9,13 +9,14 @@
 #   compute.$ROOT       receives what the agents pay for their model calls
 #   team.$ROOT          parent of one account per agent: <role>.team.$ROOT
 #   house.$ROOT         the house wallet that pays for demo jobs, hired so the CFO can top it up
+#   crew.$ROOT          the crew operator: signs for agents the public enlists (<slug>.crew.$ROOT, no keys of their own)
 #
 #   ./deploy.sh                                       testnet, root parallax.testnet
 #   NET=mainnet ROOT=parallax.near PLAN_ONLY=1 ./deploy.sh   print what mainnet would do and cost, send nothing
 #   NET=mainnet ROOT=parallax.near SIGN=ledger ROOT_PK=ed25519:… ./deploy.sh   deploy on mainnet, the root signing on a Ledger
-#   UPGRADE=1 ./deploy.sh                             testnet: put the new contract on the 2 Nov bank and migrate its state
+#   UPGRADE=1 ./deploy.sh                             testnet: put the new contract on the 4 Nov bank and open the crew
 #
-# Every account that signs on the server (CFO, agents, house) ends with one function-call key that can only call the
+# Every account that signs on the server (CFO, agents, house, crew operator) ends with one function-call key that can only call the
 # bank, and none of their calls attach a deposit. Each agent's and the house's full access moves to the root's own
 # public key (ROOT_PK, read from the keychain when the root signs there), so only the owner can ever empty them.
 #
@@ -44,15 +45,17 @@ TEAM=team.$ROOT
 CONTRIB=contributors.$ROOT
 COMPUTE=compute.$ROOT
 HOUSE=house.$ROOT
+CREW=crew.$ROOT
 AGENTS=("${ROLES[@]/%/.$TEAM}" "${SECOND_ROLES[@]/%/-2.$TEAM}")
 # NEAR each new account starts with: the bank's covers its code (~380 KB, 3.8 NEAR) and state. A signer must also
 # hold its call's whole prepaid gas up front (~0.001 NEAR per Tgas, mostly refunded): agents bid at 12 Tgas, the CFO
 # calls at 30, the house wallet pays at 80 and accepts at 150. Mainnet starts lean; teardown.sh gets most of it back.
-# Override with FUND_BANK, FUND_CFO, FUND_SMALL, FUND_AGENT, FUND_HOUSE and FUND_USDC (testnet root from the faucet has 10 NEAR).
+# The crew operator signs every enlisted agent's bids (12 Tgas), deliveries and bills (40).
+# Override with FUND_BANK, FUND_CFO, FUND_SMALL, FUND_AGENT, FUND_HOUSE, FUND_CREW and FUND_USDC (testnet root from the faucet has 10 NEAR).
 if [ "$NET" = mainnet ]; then
-  FUND_BANK=${FUND_BANK:-4.1} FUND_CFO=${FUND_CFO:-0.1} FUND_SMALL=${FUND_SMALL:-0.01} FUND_AGENT=${FUND_AGENT:-0.03} FUND_HOUSE=${FUND_HOUSE:-0.18}
+  FUND_BANK=${FUND_BANK:-4.6} FUND_CFO=${FUND_CFO:-0.1} FUND_SMALL=${FUND_SMALL:-0.01} FUND_AGENT=${FUND_AGENT:-0.03} FUND_HOUSE=${FUND_HOUSE:-0.18} FUND_CREW=${FUND_CREW:-0.06}
 else
-  FUND_BANK=${FUND_BANK:-4.5} FUND_CFO=${FUND_CFO:-0.5} FUND_SMALL=${FUND_SMALL:-0.1} FUND_AGENT=${FUND_AGENT:-0.15} FUND_HOUSE=${FUND_HOUSE:-0.25}
+  FUND_BANK=${FUND_BANK:-4.9} FUND_CFO=${FUND_CFO:-0.5} FUND_SMALL=${FUND_SMALL:-0.1} FUND_AGENT=${FUND_AGENT:-0.15} FUND_HOUSE=${FUND_HOUSE:-0.25} FUND_CREW=${FUND_CREW:-0.3}
 fi
 # team.$ROOT pays for the agents it creates, so it starts with their NEAR, ~0.008 a creation for gas, plus its own
 FUND_TEAM=$(python3 -c "print(round(${#AGENTS[@]}*($FUND_AGENT+0.008)+0.02,3))")
@@ -71,14 +74,14 @@ STORAGE=$(q "{\"request_type\":\"call_function\",\"finality\":\"final\",\"accoun
   python3 -c "import json,sys;r=json.load(sys.stdin).get('result');print(int(json.loads(bytes(r['result']))['min'])/1e24 if r else 0.00125)" 2>/dev/null || echo 0.00125)
 
 if [ "$NET" = mainnet ]; then
-  COST=$(python3 -c "print(round($FUND_BANK+$FUND_CFO+2*$FUND_SMALL+$FUND_HOUSE+$FUND_TEAM+(${#AGENTS[@]}+6)*$STORAGE+0.1,2))")
+  COST=$(python3 -c "print(round($FUND_BANK+$FUND_CFO+2*$FUND_SMALL+$FUND_HOUSE+$FUND_CREW+$FUND_TEAM+(${#AGENTS[@]}+6)*$STORAGE+0.1,2))")
   cat <<PLAN
 Mainnet plan for $ROOT (policy-mainnet.json, USDC $USDC):
-  create  $BANK ($FUND_BANK NEAR), $CFO ($FUND_CFO), $CONTRIB, $COMPUTE ($FUND_SMALL each), $HOUSE ($FUND_HOUSE), $TEAM ($FUND_TEAM)
+  create  $BANK ($FUND_BANK NEAR), $CFO ($FUND_CFO), $CONTRIB, $COMPUTE ($FUND_SMALL each), $HOUSE ($FUND_HOUSE), $CREW ($FUND_CREW), $TEAM ($FUND_TEAM)
           ${#AGENTS[@]} agents under $TEAM ($FUND_AGENT NEAR each, paid by $TEAM)
-  deploy  the bank contract to $BANK, owner $ROOT, CFO $CFO
+  deploy  the bank contract to $BANK, owner $ROOT, CFO $CFO, crew operator $CREW
   register ${#AGENTS[@]}+6 accounts on USDC ($STORAGE NEAR each), hire ${#AGENTS[@]} agents and the house wallet
-  key     leave $CFO, the agents and $HOUSE with function-call keys on $BANK only; their full access goes to $ROOT's key
+  key     leave $CFO, the agents, $HOUSE and $CREW with function-call keys on $BANK only; their full access goes to $ROOT's key
 About $COST NEAR from $ROOT, including ~0.1 NEAR of gas. Nothing is sent in USDC.
 PLAN
   [ "${PLAN_ONLY:-}" = 1 ] && exit 0
@@ -122,6 +125,7 @@ sub "$CFO" "$ROOT" $FUND_CFO
 sub "$CONTRIB" "$ROOT" $FUND_SMALL
 sub "$COMPUTE" "$ROOT" $FUND_SMALL
 sub "$HOUSE" "$ROOT" $FUND_HOUSE
+sub "$CREW" "$ROOT" $FUND_CREW
 sub "$TEAM" "$ROOT" $FUND_TEAM
 for a in "${AGENTS[@]}"; do sub "$a" "$TEAM" $FUND_AGENT; done
 
@@ -134,13 +138,12 @@ if ! exists "$BANK"; then
   echo "  deployed the bank"
 elif [ "${UPGRADE:-}" = 1 ]; then
   [ "$NET" = testnet ] || { echo "UPGRADE is for the testnet bank; a mainnet bank deploys fresh" >&2; exit 1; }
-  # Already migrated (a re-run): the new policy has daily_model_cap.
-  if [ "$(viewj "$BANK" get_policy '{}' | python3 -c "import json,sys;print('daily_model_cap' in json.load(sys.stdin))")" = False ]; then
-    MIG=$(python3 -c "import json;p=json.load(open('policy-$NET.json'));print(json.dumps({'epoch_secs':p['epoch_secs'],'compute':'$COMPUTE','daily_model_cap':p['daily_model_cap'],'require_tee':p['require_tee']}))")
+  # Already upgraded (a re-run): the bank's overview names a crew operator.
+  if [ "$(viewj "$BANK" overview '{}' | python3 -c "import json,sys;print('operator' in json.load(sys.stdin))")" = False ]; then
     near contract deploy "$BANK" use-file target/near/parallax_near.wasm \
-      with-init-call migrate json-args "$MIG" prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' \
+      with-init-call migrate json-args "{\"operator\":\"$CREW\"}" prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' \
       $NETCFG sign-with-legacy-keychain send >/dev/null
-    echo "  upgraded the bank and migrated its state"
+    echo "  upgraded the bank and opened the crew under $CREW"
   fi
   # What agents and the house hold in their own accounts goes into their balance at the bank, while they still have full keys.
   for a in "${AGENTS[@]}" "$HOUSE"; do
@@ -153,6 +156,12 @@ elif [ "${UPGRADE:-}" = 1 ]; then
       echo "  $a: $HAVE units into its balance at the bank"
     fi
   done
+fi
+
+# The crew opens once the bank knows its operator (a fresh bank; an upgraded one names it in migrate).
+if [ "$(viewj "$BANK" overview '{}' | python3 -c "import json,sys;print(json.load(sys.stdin).get('operator'))")" = None ]; then
+  call "$BANK" set_operator "{\"operator\":\"$CREW\"}" "$ROOT"
+  echo "  the crew operator is $CREW"
 fi
 
 # Everyone who receives USDC must be registered on the token.
@@ -179,7 +188,7 @@ if [ -f "$KEYS/$CFO.json" ] && ! [ -f "$KEYS/$CFO.bank-key.json" ]; then
   echo "  $CFO now has only a function-call key on $BANK"
 fi
 
-# The agents and the house the same way: a function-call key on the bank (no allowance cap: they pay their own gas),
+# The agents, the house and the crew operator the same way: a function-call key on the bank (no allowance cap: they pay their own gas),
 # and their full access handed to the root's key, so the server never holds a key that can move their NEAR or tokens.
 ROOT_PK=${ROOT_PK:-$(python3 -c "import json;print(json.load(open('$KEYS/$ROOT.json'))['public_key'])" 2>/dev/null || true)}
 [ -n "$ROOT_PK" ] || { echo "set ROOT_PK to $ROOT's public key (ed25519:…)" >&2; exit 1; }
@@ -187,7 +196,7 @@ keys_of() { # the account's keys as "public_key permission" lines (permission: f
   q "{\"request_type\":\"view_access_key_list\",\"finality\":\"final\",\"account_id\":\"$1\"}" |
     python3 -c "import json,sys;[print(k['public_key'],'full' if k['access_key']['permission']=='FullAccess' else 'fc') for k in json.load(sys.stdin)['result']['keys']]"
 }
-for a in "${AGENTS[@]}" "$HOUSE"; do
+for a in "${AGENTS[@]}" "$HOUSE" "$CREW"; do
   # each step checks the chain first, so a run cut short (a rate-limited RPC, say) picks up where it stopped
   if ! [ -f "$KEYS/$a.bank-key.json" ]; then
     retry near account add-key "$a" grant-function-call-access --allowance unlimited --contract-account-id "$BANK" \
@@ -218,7 +227,7 @@ json.dump({
   "rpcFallbacks": ["https://rpc.mainnet.near.org"] if mainnet else ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"],
   "explorer": "https://nearblocks.io" if mainnet else "https://testnet.nearblocks.io",
   "owner": "$ROOT", "bank": "$BANK", "usdc": "$USDC", "usdcFaucet": not mainnet,
-  "cfo": "$CFO", "contributors": "$CONTRIB", "team": team, "compute": "$COMPUTE", "house": "$HOUSE",
+  "cfo": "$CFO", "contributors": "$CONTRIB", "team": team, "compute": "$COMPUTE", "house": "$HOUSE", "crew": "$CREW",
 }, open(sys.argv[1], "w"), indent=2)
 open(sys.argv[1], "a").write("\n")
 PY

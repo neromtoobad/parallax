@@ -1,5 +1,5 @@
-// Builds PARALLAX_NEAR_KEYS for hosting: the function-call keys on the bank of the CFO, each agent and the
-// house wallet, read from the near-cli keychain (~/.near-credentials/<net>, <account>.bank-key.json, made by
+// Builds PARALLAX_NEAR_KEYS for hosting: the function-call keys on the bank of the CFO, each agent, the
+// house wallet and the crew operator, read from the near-cli keychain (~/.near-credentials/<net>, <account>.bank-key.json, made by
 // deploy.sh). Only these accounts sign on the server, and only with these keys: a full-access key is never
 // included, and neither are the owner's or the bank's. Writes a private file (mode 600) outside the repo and prints account
 // names only, never a key. Paste the file's contents into the host's secret settings.
@@ -27,6 +27,8 @@ const team = `.${NEAR.team[Object.keys(NEAR.team)[0]].split('.').slice(1).join('
 for (const f of readdirSync(dir).filter((f) => f.endsWith(`${team}.json`))) add(f.slice(0, -5));
 // the house wallet, which pays for and accepts demo jobs
 if (NEAR.house) add(NEAR.house);
+// the crew operator, which signs for enlisted agents
+if (NEAR.crew) add(NEAR.crew);
 
 writeFileSync(out, JSON.stringify(keys), { mode: 0o600 });
 console.log(`wrote ${Object.keys(keys).length} keys to ${out} (mode 600):\n  ${Object.keys(keys).sort().join('\n  ')}`);

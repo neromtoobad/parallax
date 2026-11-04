@@ -4,11 +4,11 @@ The hackathon entry runs on testnet so anyone can try it with free test USDC. Th
 
 ## What it costs
 
-Sized to about $23 in all, at NEAR ≈ $3.90. Almost all of it comes back when you close the deployment.
+Sized to about $25 in all, at NEAR ≈ $3.90. Almost all of it comes back when you close the deployment.
 
 | What | Amount | Comes back? |
 |---|---|---|
-| NEAR for the deploy | about **5.1 NEAR** from the root account: 4.1 to the bank (its code is 380 KB, 3.8 NEAR of storage, plus room for about ten jobs of state), 0.55 to `team` (0.03 per agent for bid gas, plus ~0.008 for each account it creates), 0.1 to the CFO, 0.18 to the house wallet, 0.01 each to `contributors` and `compute`, 20 USDC registrations (0.00125 each), ~0.1 gas | yes, all but the gas spent and the CFO's 0.1, through `teardown.sh` |
+| NEAR for the deploy | about **5.65 NEAR** from the root account: 4.6 to the bank (its code is 428 KB, 4.3 NEAR of storage, plus room for about ten jobs of state), 0.55 to `team` (0.03 per agent for bid gas, plus ~0.008 for each account it creates), 0.1 to the CFO, 0.18 to the house wallet, 0.06 to `crew` (gas for the open crew's bids), 0.01 each to `contributors` and `compute`, 20 USDC registrations (0.00125 each), ~0.1 gas | yes, all but the gas spent and the CFO's 0.1, through `teardown.sh` |
 | USDC for the bank | about **3 USDC**, after the deploy | yes: it goes round between the house wallet, escrow, the agents and the bank, and `teardown.sh` sweeps every account back |
 | NEAR AI Cloud | your key's credits, billed by NEAR AI | no |
 
@@ -20,7 +20,7 @@ The policy is [`contracts/near/policy-mainnet.json`](contracts/near/policy-mainn
 
 ## Steps
 
-**1. Make the root account.** Create `useparallax.near` (or another name) in a wallet such as MyNearWallet, Meteor or HOT, and send it about 5.3 NEAR. Then either import its key for near-cli (`near account import-account`) or plan to sign on a Ledger (`SIGN=ledger`).
+**1. Make the root account.** Create `useparallax.near` (or another name) in a wallet such as MyNearWallet, Meteor or HOT, and send it about 5.9 NEAR. Then either import its key for near-cli (`near account import-account`) or plan to sign on a Ledger (`SIGN=ledger`).
 
 **2. Check everything, reading only.**
 
@@ -90,6 +90,7 @@ It refuses while any customer has money in escrow. Otherwise it stops the bank, 
 - **Owner (`useparallax.near`).** Keep it in a wallet or on a Ledger, not on the server. It co-signs big moves, changes the policy, hires and fires, and holds the kill switch. If you imported it for the deploy, remove it from `~/.near-credentials/mainnet` afterwards.
 - **Bank (`bank.useparallax.near`).** Its full-access key can replace the contract's code. Treat the bank as fixed: keep its key file offline, and keep it, because `teardown.sh` needs it to close the bank. A new version means a new bank, with the money moved over by `owner_withdraw`. (You could delete this key after the deploy so nobody can ever change the code, but then `teardown.sh` can't recover the bank's ~4 NEAR.)
 - **CFO.** A function-call key on the bank only, with a 0.45 NEAR gas allowance. It can't send money anywhere the contract doesn't allow.
+- **The crew operator (`crew.useparallax.near`).** A function-call key on the bank only. It signs bids, deliveries and model bills for agents people add at `/crew`, and the bank lets it act only for agents on the crew, which earn into their own balances that only their sponsors can cash out.
 - **Agents and the house wallet.** A function-call key on the bank only. Their money is a balance inside the bank: an agent can pay model bills only to the compute account and inside `daily_model_cap`, and the house can only fund jobs. None of their calls attach a deposit, so none needs a full-access key. Their full access is your root key, which never goes to the server.
 - **Agent Market payer (optional).** x402 pays with a signed `ft_transfer`, which needs a full-access key, so `MARKET_PAYER_KEY` is the one full-access key on the server. Keep that account holding only a few dollars; the per-hire and daily caps (`MARKET_MAX_USD`, `MARKET_DAY_USD`) also limit it.
 
@@ -112,7 +113,7 @@ near contract call-function as-transaction bank.useparallax.near owner_withdraw 
 
 ## Not done yet
 
-- **No outside review of the contract.** It has 55 tests and the swarm simulation, and the policy caps and kill switch limit what a bug can cost. Start with small caps.
+- **No outside review of the contract.** It has 74 tests and the swarm simulation, and the policy caps and kill switch limit what a bug can cost. Start with small caps.
 - **Paying from another chain.** 1Click quotes are dry. 1Click can deliver straight into a job's escrow (recipient the bank, `customRecipientMsg: "job:<id>"`, which it sends as `ft_transfer_call`); that isn't built yet.
 - **The full Intel quote check.** `/proof` checks that each approved signer's TDX quote binds its key and that the report's hash is the one on the bank, but not Intel's signature chain on the quote itself. NEAR AI's own verifier, or `dcap-qvl`, does that.
 - **Gas per job.** A job is about 35 transactions (lots, sealed bids, reveals, awards, inspections, delivery, acceptance), roughly 0.02–0.05 NEAR, which agents and the CFO pay. On $1 jobs that matters; a relayer for the bid transactions, or fewer lots on cheap jobs, would cut it. With the lean funding, each agent's 0.03 NEAR covers about 25 jobs.

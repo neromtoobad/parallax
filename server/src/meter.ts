@@ -77,6 +77,7 @@ export async function buy<T>(
     cost?: (data: any) => Promise<number | undefined> | number | undefined; // measured cost of the call
     form?: FormData; // multipart body instead of JSON
     tee?: string; // the model, when the call runs in NEAR AI Cloud's TEE and is signed
+    keep?: (request: string, answer: string) => void; // the exact bytes sent and received, for a caller that publishes them
   },
 ): Promise<T> {
   const account = job.payer(opts.agent); // the lot's winner does, and pays for, its part of the job
@@ -139,6 +140,7 @@ export async function buy<T>(
     amount: String(Math.round(usd * 1e6)), usd, transaction: String(data?.id ?? data?.created ?? 'call'),
     reason: opts.reason, status: res!.status, dry: false, account, ...(tee ? { tee } : {}),
   });
+  if (typeof body === 'string') opts.keep?.(body, raw);
   if (opts.tee && !tee) job.log(opts.agent, 'note', `${opts.vendor}: no TEE signature for this call`);
   return data as T;
 }

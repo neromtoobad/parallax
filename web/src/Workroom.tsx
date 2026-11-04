@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { usd, type Order, type Step } from './api.ts';
 import type { LiveLot } from './parts.tsx';
-import { idOf, NAMES } from './team.ts';
+import { CREW, idOf, NAMES } from './team.ts';
 
 type Beat =
   | { k: 'open'; key: string; title: string; reserve: number }
@@ -21,7 +21,7 @@ type Beat =
 const HOLD: Record<Beat['k'], number> = { open: 1300, commit: 650, quote: 900, reveal: 750, award: 1900, void: 1200, step: 1700, inspect: 1100, deliver: 1200, accept: 2600, reject: 1600, stop: 1600 };
 
 const ROSTER = Object.keys(NAMES);
-const name = (id?: string) => (id ? NAMES[id] ?? id.replace(/^outside:/, '') : '');
+const name = (id?: string) => (id ? NAMES[id] ?? CREW[id] ?? id.replace(/^outside:/, '') : '');
 
 // The stage picture is 1115 x 1102; everything below is in its pixels.
 const W = 1115, H = 1102;

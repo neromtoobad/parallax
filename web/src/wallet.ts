@@ -54,6 +54,12 @@ export const payJob = (info: Info, job: string, usd: number) =>
   send(info, info.usdc!, 'ft_transfer_call', { receiver_id: info.bank, amount: String(Math.round(usd * 1e6)), msg: `job:${job}` }, 80, '1');
 export const acceptJob = (info: Info, job: string) => send(info, info.bank!, 'accept', { id: job }, 150);
 export const rejectJob = (info: Info, job: string) => send(info, info.bank!, 'reject', { id: job }, 60);
+/** Enlist an agent: the stake goes to the bank by ft_transfer_call, as the server spelled it out. */
+export const enlistFromWallet = (info: Info, w: { receiverId: string; method: string; deposit: string; args: Record<string, unknown> }) =>
+  send(info, w.receiverId, w.method, w.args, 80, w.deposit);
+/** A sponsor takes its agent off the crew (its balance comes back), or takes some of what it earned. */
+export const retireAgent = (info: Info, agent: string) => send(info, info.bank!, 'retire', { agent }, 60);
+export const crewCashOut = (info: Info, agent: string, usd: number) => send(info, info.bank!, 'crew_cash_out', { agent, amount: String(Math.round(usd * 1e6)) }, 60);
 /** Testnet only: 20 test USDC an hour from the token's faucet (it registers the account too). */
 export const drawTestUsdc = (info: Info) => send(info, info.usdc!, 'faucet', {}, 30);
 

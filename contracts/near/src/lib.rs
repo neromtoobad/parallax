@@ -22,6 +22,11 @@
 //!    Team work carries NEAR AI Cloud's TEE signatures over the exact request
 //!    and answer; the bank recovers each signer and takes the work only from
 //!    an approved signer for that model.
+//! 4. **The open crew.** Anyone can add an agent to the swarm: a name, a role and
+//!    the hash of its playbook, with a USDC stake that becomes its balance and
+//!    pays its first model bills. It bids only after the CFO's AI review passes
+//!    it (the review itself TEE-signed). The crew operator signs for enlisted
+//!    agents; their sponsor keeps what they earn and can retire them any time.
 //!
 //! RULES.md is the plain-language version.
 
@@ -46,6 +51,15 @@ const REP_FAIL: u16 = 50;
 const REP_NO_REVEAL: u16 = 20;
 /// Below this an agent is on probation and cannot bid.
 const REP_MIN_BID: u16 = 200;
+/// Where an enlisted agent starts: above probation, below a hired agent, so it has to be cheaper to win.
+const REP_ENLIST: u16 = 300;
+/// The least an enlisted agent can start with, in USDC units (0.10 USDC).
+const MIN_STAKE: u128 = 100_000;
+/// Enlisted agents under review or active at once, in all and per sponsor.
+const MAX_CREW: usize = 40;
+const MAX_PER_SPONSOR: usize = 3;
+/// The roles an enlisted agent may take. Checking stays with the hired auditors.
+const CREW_ROLES: [&str; 8] = ["scout", "researcher", "reader", "investigator", "writer", "analyst", "illustrator", "producer"];
 const FT_GAS: Gas = Gas::from_tgas(15);
 const CB_GAS: Gas = Gas::from_tgas(10);
 
@@ -138,6 +152,38 @@ pub struct Agent {
     pub earned: U128,
     pub wins: u32,
     pub fails: u32,
+}
+
+#[near(serializers = [borsh, json])]
+#[derive(Clone, PartialEq, Debug)]
+pub enum CrewState {
+    /// Waiting for the CFO's AI review; it can't bid yet.
+    Review,
+    Active,
+    Rejected,
+    Retired,
+}
+
+/// An agent someone outside added to the swarm.
+#[near(serializers = [borsh, json])]
+#[derive(Clone)]
+pub struct Crew {
+    pub sponsor: AccountId,
+    pub name: String,
+    /// sha256 of its spec (playbook, knowledge, tools, markup), as the server stores and serves it.
+    pub spec: String,
+    pub state: CrewState,
+    pub note: String,
+    pub joined: U64,
+}
+
+/// `ft_transfer_call` msg `enlist:<this as JSON>`: the transfer is the stake.
+#[near(serializers = [json])]
+pub struct EnlistMsg {
+    pub slug: String,
+    pub role: String,
+    pub name: String,
+    pub spec: String,
 }
 
 #[near(serializers = [borsh, json])]
@@ -275,6 +321,9 @@ pub struct Overview {
     /// What agents (and the house wallet) hold inside the bank.
     pub held: U128,
     pub day_model_spend: U128,
+    /// The account that signs for enlisted agents, once the owner has set one.
+    pub operator: Option<AccountId>,
+    pub crew: u32,
     pub agents: u32,
     pub jobs: u32,
     pub lots: u32,
@@ -313,6 +362,8 @@ pub struct Parallax {
     held: u128,
     day_model_spend: u128,
     signers: IterableMap<String, Signer>,
+    operator: Option<AccountId>,
+    crew: IterableMap<AccountId, Crew>,
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -403,6 +454,8 @@ impl Parallax {
             held: 0,
             day_model_spend: 0,
             signers: IterableMap::new(b"s"),
+            operator: None,
+            crew: IterableMap::new(b"c"),
         }
     }
 
@@ -410,6 +463,8 @@ impl Parallax {
 
     /// USDC arrives with `ft_transfer_call`. `msg` says what it is for:
     /// `job:<id>` funds that job (exactly its price; any extra is returned),
+    /// `enlist:<json>` adds an agent to the crew with the transfer as its stake,
+    /// `fund:<agent>` adds to a hired agent's balance (anyone may),
     /// anything else is a deposit into OPERATING.
     pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String) -> PromiseOrValue<U128> {
         require!(env::predecessor_account_id() == self.usdc, "only USDC");
@@ -418,6 +473,18 @@ impl Parallax {
                 Some(price) => amount.0 - price,
                 None => amount.0,
             }));
+        }
+        if let Some(m) = msg.strip_prefix("enlist:") {
+            let m: EnlistMsg = near_sdk::serde_json::from_str(m).unwrap_or_else(|_| env::panic_str("enlist: expects {slug, role, name, spec}"));
+            self.do_enlist(sender_id, m, amount.0);
+            return PromiseOrValue::Value(U128(0));
+        }
+        if let Some(a) = msg.strip_prefix("fund:") {
+            let a: AccountId = a.parse().unwrap_or_else(|_| env::panic_str("fund: expects an agent account"));
+            self.agent(&a);
+            self.credit(&a, amount.0, "funded");
+            emit("fund_agent", json!({"agent": a, "from": sender_id, "amount": amount}));
+            return PromiseOrValue::Value(U128(0));
         }
         // An agent putting its own USDC into its balance at the bank.
         if msg == "balance" && self.agents.get(&sender_id).is_some() {
@@ -529,8 +596,11 @@ impl Parallax {
     /// An agent pays for its model calls from its balance. The money goes only to the policy's
     /// compute account, and all agents' bills together stay inside daily_model_cap.
     pub fn pay_bill(&mut self, amount: U128, memo: String) {
+        self.do_pay_bill(env::predecessor_account_id(), amount, memo);
+    }
+
+    fn do_pay_bill(&mut self, me: AccountId, amount: U128, memo: String) {
         self.alive();
-        let me = env::predecessor_account_id();
         self.agent(&me);
         require!(amount.0 > 0, "nothing to pay");
         self.roll_day();
@@ -564,7 +634,95 @@ impl Parallax {
         self.pay_out(me, amount.0, "cash_out");
     }
 
+    // ============================================================ the open crew
+
+    /// Add an agent to the crew, staked from the caller's balance at the bank (the house wallet does
+    /// this for visitors without a wallet). From a wallet, send the stake with `ft_transfer_call`
+    /// and msg `enlist:{"slug","role","name","spec"}` instead.
+    pub fn enlist(&mut self, slug: String, role: String, name: String, spec: String, stake: U128) {
+        let me = env::predecessor_account_id();
+        self.debit(&me, stake.0);
+        self.do_enlist(me, EnlistMsg { slug, role, name, spec }, stake.0);
+    }
+
+    /// The CFO's verdict on an enlisted agent, from an AI review of its spec. The review's own model
+    /// answer comes with its TEE signature. A pass lets it bid; a fail returns its stake.
+    pub fn review(&mut self, agent: AccountId, pass: bool, note: String, tee: Option<Vec<TeeSig>>) {
+        self.only_cfo();
+        self.alive();
+        let mut c = self.crew_of(&agent);
+        require!(c.state == CrewState::Review, "not waiting for review");
+        let signed = self.check_tee(tee.unwrap_or_default(), "a review must carry its TEE signature");
+        let mut a = self.agent(&agent);
+        a.active = pass;
+        self.agents.insert(agent.clone(), a);
+        c.state = if pass { CrewState::Active } else { CrewState::Rejected };
+        c.note = note.chars().take(280).collect();
+        emit("review", json!({"agent": agent, "pass": pass, "note": c.note, "tee": signed}));
+        let sponsor = c.sponsor.clone();
+        self.crew.insert(agent.clone(), c);
+        if !pass {
+            self.return_balance(&agent, &sponsor, "rejected");
+        }
+    }
+
+    /// The sponsor (or the owner) takes an enlisted agent off the crew. What it holds goes to the sponsor.
+    pub fn retire(&mut self, agent: AccountId) {
+        let me = env::predecessor_account_id();
+        let mut c = self.crew_of(&agent);
+        require!(me == c.sponsor || me == self.owner, "only its sponsor or the owner");
+        require!(matches!(c.state, CrewState::Review | CrewState::Active), "already off the crew");
+        let mut a = self.agent(&agent);
+        a.active = false;
+        self.agents.insert(agent.clone(), a);
+        c.state = CrewState::Retired;
+        let sponsor = c.sponsor.clone();
+        self.crew.insert(agent.clone(), c);
+        emit("retire", json!({"agent": agent, "by": me}));
+        self.return_balance(&agent, &sponsor, "retired");
+    }
+
+    /// The sponsor takes some of what its agent has earned. Pay for lots accepted after a retire lands here too.
+    pub fn crew_cash_out(&mut self, agent: AccountId, amount: U128) {
+        self.alive();
+        let c = self.crew_of(&agent);
+        require!(env::predecessor_account_id() == c.sponsor, "only its sponsor");
+        self.debit(&agent, amount.0);
+        emit("cash_out", json!({"agent": agent, "to": c.sponsor, "amount": amount}));
+        self.send_to(&c.sponsor, amount.0, "crew cash out");
+    }
+
+    // The crew operator signs for enlisted agents, with the same rules as an agent signing for itself.
+
+    pub fn crew_commit(&mut self, agent: AccountId, lot: u64, hash: String) {
+        self.only_operator(&agent);
+        self.do_commit(agent, lot, hash);
+    }
+
+    pub fn crew_reveal(&mut self, agent: AccountId, lot: u64, price: U128, salt: String) {
+        self.only_operator(&agent);
+        self.do_reveal(agent, lot, price, salt);
+    }
+
+    pub fn crew_deliver(&mut self, agent: AccountId, lot: u64, deliverable: String, tee: Option<Vec<TeeSig>>) {
+        self.only_operator(&agent);
+        self.do_deliver(agent, lot, deliverable, tee);
+    }
+
+    pub fn crew_pay_bill(&mut self, agent: AccountId, amount: U128, memo: String) {
+        self.only_operator(&agent);
+        self.do_pay_bill(agent, amount, memo);
+    }
+
     // ============================================================ owner
+
+    /// The account that signs for enlisted agents. Enlisted agents are named <slug>.<operator>.
+    pub fn set_operator(&mut self, operator: AccountId) {
+        self.only_owner();
+        require!(self.crew.is_empty(), "the crew already has agents named under the current operator");
+        self.operator = Some(operator.clone());
+        emit("operator", json!({"operator": operator}));
+    }
 
     pub fn co_sign(&mut self, id: u64) {
         self.only_owner();
@@ -783,8 +941,11 @@ impl Parallax {
     }
 
     pub fn commit(&mut self, lot: u64, hash: String) {
+        self.do_commit(env::predecessor_account_id(), lot, hash);
+    }
+
+    fn do_commit(&mut self, me: AccountId, lot: u64, hash: String) {
         self.alive();
-        let me = env::predecessor_account_id();
         let a = self.agent(&me);
         require!(a.active, "agent not active");
         require!(a.rep >= REP_MIN_BID, "on probation");
@@ -801,8 +962,11 @@ impl Parallax {
     }
 
     pub fn reveal(&mut self, lot: u64, price: U128, salt: String) {
+        self.do_reveal(env::predecessor_account_id(), lot, price, salt);
+    }
+
+    fn do_reveal(&mut self, me: AccountId, lot: u64, price: U128, salt: String) {
         self.alive();
-        let me = env::predecessor_account_id();
         let mut l = self.lot(lot);
         require!(l.status == LotStatus::Bidding, "not bidding");
         let now = env::block_timestamp();
@@ -903,22 +1067,15 @@ impl Parallax {
     /// A team winner files its work (the hash of its files) with NEAR AI Cloud's TEE signatures over
     /// its model calls. Each must recover to an approved signer whose model the signed text names.
     pub fn deliver(&mut self, lot: u64, deliverable: String, tee: Option<Vec<TeeSig>>) {
+        self.do_deliver(env::predecessor_account_id(), lot, deliverable, tee);
+    }
+
+    fn do_deliver(&mut self, me: AccountId, lot: u64, deliverable: String, tee: Option<Vec<TeeSig>>) {
         self.alive();
-        let me = env::predecessor_account_id();
         let mut l = self.lot(lot);
         require!(l.status == LotStatus::Awarded, "not awarded");
         require!(l.winner == Some(Seller::Team(me.clone())), "not the winner");
-        let tee = tee.unwrap_or_default();
-        require!(tee.len() <= 12, "at most 12 signatures");
-        require!(!self.policy.require_tee || !tee.is_empty(), "team work must carry TEE signatures");
-        let mut signed = vec![];
-        for t in tee.iter() {
-            let who = tee_signer(&t.text, &t.signature).unwrap_or_else(|| env::panic_str("a TEE signature doesn't recover"));
-            let sg = self.signers.get(&who).filter(|s| s.active).unwrap_or_else(|| env::panic_str("signed by a key the bank hasn't approved"));
-            let parts: Vec<&str> = t.text.rsplitn(3, ':').collect();
-            require!(parts.len() == 3 && parts[2] == sg.model && parts[0].len() == 64 && parts[1].len() == 64, "the signed text isn't model:request:answer for this signer's model");
-            signed.push(json!({"signer": who, "text": t.text}));
-        }
+        let signed = self.check_tee(tee.unwrap_or_default(), "team work must carry TEE signatures");
         l.status = LotStatus::Submitted;
         l.deliverable = deliverable.clone();
         self.lots.replace(lot as u32, l);
@@ -1013,6 +1170,8 @@ impl Parallax {
             day_lot_spend: U128(self.day_lot_spend),
             held: U128(self.held),
             day_model_spend: U128(self.day_model_spend),
+            operator: self.operator.clone(),
+            crew: self.crew.len(),
             agents: self.agents.len(),
             jobs: self.jobs.len(),
             lots: self.lots.len(),
@@ -1066,6 +1225,14 @@ impl Parallax {
         self.signers.iter().map(|(a, s)| (a.clone(), s.clone())).collect()
     }
 
+    pub fn get_crew(&self, agent: AccountId) -> Option<Crew> {
+        self.crew.get(&agent).cloned()
+    }
+
+    pub fn list_crew(&self) -> Vec<(AccountId, Crew)> {
+        self.crew.iter().map(|(a, c)| (a.clone(), c.clone())).collect()
+    }
+
     pub fn owed_to(&self, account: AccountId) -> U128 {
         U128(self.owed.get(&account).copied().unwrap_or(0))
     }
@@ -1101,6 +1268,89 @@ impl Parallax {
 
     fn agent(&self, a: &AccountId) -> Agent {
         self.agents.get(a).cloned().unwrap_or_else(|| env::panic_str("not an agent"))
+    }
+
+    fn crew_of(&self, a: &AccountId) -> Crew {
+        self.crew.get(a).cloned().unwrap_or_else(|| env::panic_str("not on the crew"))
+    }
+
+    fn only_operator(&self, agent: &AccountId) {
+        require!(Some(env::predecessor_account_id()) == self.operator, "only the crew operator");
+        self.crew_of(agent);
+    }
+
+    /// Each signature must recover to an active approved signer, over "model:sha256:sha256" for its model.
+    fn check_tee(&self, tee: Vec<TeeSig>, needed: &str) -> Vec<Value> {
+        require!(tee.len() <= 12, "at most 12 signatures");
+        require!(!self.policy.require_tee || !tee.is_empty(), needed);
+        let mut signed = vec![];
+        for t in tee.iter() {
+            let who = tee_signer(&t.text, &t.signature).unwrap_or_else(|| env::panic_str("a TEE signature doesn't recover"));
+            let sg = self.signers.get(&who).filter(|s| s.active).unwrap_or_else(|| env::panic_str("signed by a key the bank hasn't approved"));
+            let parts: Vec<&str> = t.text.rsplitn(3, ':').collect();
+            require!(parts.len() == 3 && parts[2] == sg.model && parts[0].len() == 64 && parts[1].len() == 64, "the signed text isn't model:request:answer for this signer's model");
+            signed.push(json!({"signer": who, "text": t.text}));
+        }
+        signed
+    }
+
+    fn do_enlist(&mut self, sponsor: AccountId, m: EnlistMsg, stake: u128) {
+        self.alive();
+        let op = self.operator.clone().unwrap_or_else(|| env::panic_str("the crew isn't open yet"));
+        let s = m.slug.as_bytes();
+        require!(
+            (2..=24).contains(&s.len()) && s.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-') && s[0] != b'-' && s[s.len() - 1] != b'-',
+            "slug: 2 to 24 of a-z, 0-9 and -"
+        );
+        require!(CREW_ROLES.contains(&m.role.as_str()), "that role isn't open to the crew");
+        let name = m.name.trim().to_string();
+        require!((1..=32).contains(&name.chars().count()), "name: 1 to 32 characters");
+        require!(m.spec.len() == 64 && m.spec.bytes().all(|c| c.is_ascii_hexdigit()), "spec must be a sha256 in hex");
+        require!(stake >= MIN_STAKE, "stake at least 0.10 USDC");
+        let id: AccountId = format!("{}.{}", m.slug, op).parse().unwrap_or_else(|_| env::panic_str("bad slug"));
+        require!(self.agents.get(&id).is_none(), "that name is taken");
+        let on = |c: &Crew| matches!(c.state, CrewState::Review | CrewState::Active);
+        require!(self.crew.values().filter(|c| on(c)).count() < MAX_CREW, "the crew is full");
+        require!(self.crew.values().filter(|c| on(c) && c.sponsor == sponsor).count() < MAX_PER_SPONSOR, "at most 3 agents per sponsor");
+        self.agents.insert(
+            id.clone(),
+            Agent {
+                role: m.role.clone(),
+                active: false,
+                rep: REP_ENLIST,
+                allowance_epoch: U64(0),
+                allowance: U128(0),
+                topped_up: U128(0),
+                earned: U128(0),
+                wins: 0,
+                fails: 0,
+            },
+        );
+        self.crew.insert(
+            id.clone(),
+            Crew { sponsor: sponsor.clone(), name: name.clone(), spec: m.spec.clone(), state: CrewState::Review, note: String::new(), joined: U64(env::block_timestamp()) },
+        );
+        emit("enlist", json!({"agent": id, "sponsor": sponsor, "role": m.role, "name": name, "spec": m.spec, "stake": U128(stake)}));
+        self.credit(&id, stake, "stake");
+    }
+
+    /// An enlisted agent's whole balance goes back to its sponsor.
+    fn return_balance(&mut self, agent: &AccountId, sponsor: &AccountId, why: &str) {
+        let b = self.balances.get(agent).copied().unwrap_or(0);
+        if b > 0 {
+            self.debit(agent, b);
+            emit("cash_out", json!({"agent": agent, "to": sponsor, "amount": U128(b), "why": why}));
+            self.send_to(sponsor, b, why);
+        }
+    }
+
+    /// To a hired account (the house wallet) as a balance at the bank; to anyone else as a USDC transfer.
+    fn send_to(&mut self, to: &AccountId, amount: u128, what: &str) {
+        if self.agents.get(to).is_some() {
+            self.credit(to, amount, what);
+        } else {
+            self.pay_out(to.clone(), amount, what);
+        }
     }
 
     fn job(&self, id: &str) -> Job {

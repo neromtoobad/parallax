@@ -10,7 +10,7 @@
 # NEAR won't delete an account that stores more than 10 KB, so the bank's code is first replaced with
 # contracts/near-cleanup (680 bytes), which clears the bank's storage; then the account is deleted.
 # The CFO is left as it is: deploy.sh took away its full-access key, so only its gas allowance stays there.
-# The agents and the house wallet are closed with the root's own key, which deploy.sh made their full-access key.
+# The agents, the house wallet and the crew operator are closed with the root's own key, which deploy.sh made their full-access key.
 set -euo pipefail
 cd "$(dirname "$0")"
 NET=${NET:-testnet}
@@ -62,7 +62,7 @@ close() { # close <account>: its USDC to the root, its USDC registration refunde
 
 # Everyone below team.$ROOT, from the keychain, plus the other accounts deploy.sh made.
 AGENTS=($(ls "$KEYS" 2>/dev/null | sed -n "s/^\(.*\.$TEAM\)\.json$/\1/p"))
-OTHERS=($(j "['house']" 2>/dev/null || true) $(j "['contributors']") $(j "['compute']"))
+OTHERS=($(j "['house']" 2>/dev/null || true) $(j "['crew']" 2>/dev/null || true) $(j "['contributors']") $(j "['compute']"))
 OV=$(view "$BANK" overview '{}')
 read -r ESCROW BONDS OWED BUCKETS <<<"$(python3 -c "
 import json;o=json.loads('''$OV''');print(o['escrowed'],o['bonds_outstanding'],o['owed'],','.join(o['buckets']))")"
@@ -80,9 +80,13 @@ read -r -p "Type $ROOT to close this deployment: " typed
 
 # 1. Stop the CFO and the agents, and take every bucket out to the root.
 if ! gone "$BANK"; then
+  # Enlisted agents belong to their sponsors: retiring one sends its whole balance back to its sponsor.
+  for a in $(view "$BANK" list_crew '{}' | python3 -c "import json,sys;print(' '.join(a for a,c in (json.loads(sys.stdin.read()) or []) if c['state'] in ('Review','Active')))" 2>/dev/null); do
+    call "$BANK" retire "{\"agent\":\"$a\"}" "$ROOT" && echo "  $a: retired, its balance back to its sponsor"
+  done
   call "$BANK" set_killed '{"killed":true}' "$ROOT"
-  # Agents' balances at the bank go back into OPERATING first, so they leave with the buckets.
-  for a in $(view "$BANK" list_balances '{}' | python3 -c "import json,sys;print(' '.join(a for a,b in (json.loads(sys.stdin.read()) or []) if b!='0'))"); do
+  # The team's balances at the bank go back into OPERATING first, so they leave with the buckets.
+  for a in $(view "$BANK" list_balances '{}' | python3 -c "import json,sys;print(' '.join(a for a,b in (json.loads(sys.stdin.read()) or []) if b!='0' and not a.endswith('.crew.$ROOT')))"); do
     call "$BANK" reclaim "{\"agent\":\"$a\"}" "$ROOT" && echo "  $a: its balance back into OPERATING"
   done
   BUCKETS=$(view "$BANK" overview '{}' | python3 -c "import json,sys;print(','.join(json.load(sys.stdin)['buckets']))")

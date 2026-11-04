@@ -26,8 +26,15 @@ export type Order = {
 };
 export type Info = {
   mode: string; model: string; bank: string | null; explorer: string | null; usdc: string | null; search: boolean;
-  canned: boolean; house: string | null; faucet: boolean;
+  canned: boolean; house: string | null; faucet: boolean; crew: string | null;
 };
+export type CrewSpec = { slug: string; name: string; role: string; playbook: string; knowledge: string; markup: number; search: boolean; style: string };
+export type CrewMember = {
+  agent: string; slug: string; name: string; sponsor: string; state: 'Review' | 'Active' | 'Rejected' | 'Retired'; note: string; joined: number;
+  specHash: string; spec?: CrewSpec; role?: string; rep?: number; wins: number; fails: number; earned: number; balance: number;
+  review?: { pass: boolean; note: string; flags: string[]; signer?: string; bill?: string; tx?: string; at: string };
+};
+export type WalletCall = { receiverId: string; method: string; deposit: string; args: Record<string, unknown> };
 export type Event = { type: string; orderId?: string; data: any; at: number };
 
 async function req<T>(path: string, body?: unknown): Promise<T> {
@@ -46,6 +53,9 @@ export const api = {
   pay: (id: string, wallet: 'demo' | 'own' = 'demo') => req<Order>(`/api/orders/${id}/pay`, { wallet }),
   accept: (id: string, tx?: string) => req<Order>(`/api/orders/${id}/accept`, { tx }),
   reject: (id: string, tx?: string) => req<Order>(`/api/orders/${id}/reject`, { tx }),
+  crew: () => req<{ operator: string | null; houseStake: number; minStake: number; crew: CrewMember[] }>('/api/crew'),
+  saveSpec: (spec: Partial<CrewSpec>, stake: number) => req<{ hash: string; agent: string; flags: string[]; wallet: WalletCall; stake: number }>(`/api/crew/spec?stake=${stake}`, spec),
+  enlist: (hash: string) => req<{ tx: string; agent: string }>('/api/crew/enlist', { hash }),
 };
 
 /** Load once. */

@@ -7,6 +7,7 @@
 // { account: "ed25519:…" }, for hosting) or from the near-cli keychain in ~/.near-credentials/<net>.
 // The CFO, the agents and the house wallet sign with function-call keys that can only call the bank
 // (<account>.bank-key.json): no call of theirs attaches a deposit, so none of them needs a full-access key.
+// Enlisted agents (<slug>.<crew>) have no keys of their own: the crew operator signs for them (act()).
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -29,6 +30,7 @@ export type Deployment = {
   contributors: string;
   compute?: string; // receives what agents pay for their model calls
   house?: string; // pays for demo jobs; hired by the bank so the CFO can top it up
+  crew?: string; // the crew operator, which signs for enlisted agents named <slug>.<crew>
   team: Record<string, string>;
 };
 
@@ -81,6 +83,14 @@ function keyFile(account: string): string | null {
 export function hasKey(account: string) {
   return !!fromEnv[account] || !!keyFile(account);
 }
+
+/** An agent someone enlisted: named under the crew operator, which signs for it. */
+export const isCrew = (account: string) => !!NEAR?.crew && account.endsWith(`.${NEAR.crew}`);
+/** Whether we can sign for an agent: with its own key, or the operator's for an enlisted one. */
+export const canSign = (account: string) => (isCrew(account) ? hasKey(NEAR!.crew!) : hasKey(account));
+/** An agent's call on the bank: from its own account, or crew_<method> from the operator for an enlisted agent. */
+export const act = (agent: string, method: string, args: Record<string, unknown>, o: { tgas?: number } = {}) =>
+  isCrew(agent) ? call(NEAR!.crew!, NEAR!.bank, `crew_${method}`, { agent, ...args }, o) : call(agent, NEAR!.bank, method, args, o);
 
 function keyOf(account: string): KeyPairString {
   if (fromEnv[account]) return fromEnv[account] as KeyPairString;
@@ -278,7 +288,7 @@ export function events(logs: string[], name?: string): { event: string; data: an
 
 /** An agent pays a model bill from its balance at the bank; the bank sends it to the compute account. */
 export const payBill = (agent: string, usd: number, memo: string) =>
-  call(agent, NEAR!.bank, 'pay_bill', { amount: toUnits(usd), memo: memo.slice(0, 120) }, { tgas: 40 });
+  act(agent, 'pay_bill', { amount: toUnits(usd), memo: memo.slice(0, 120) }, { tgas: 40 });
 
 /** Send USDC into the bank with a message (a deposit, or `job:<id>` to fund a job). */
 export const payBank = (from: string, usd: number, msg: string) =>

@@ -1,0 +1,12 @@
+{
+  "agent": "grabby.crew.parallax-v2.testnet",
+  "pass": false,
+  "note": "Failed the fixed checks: links: an agent may not put links into customers' work; tries to override the task's instructions; talks about the model's own instructions.",
+  "flags": [
+    "links: an agent may not put links into customers' work",
+    "tries to override the task's instructions",
+    "talks about the model's own instructions"
+  ],
+  "tx": "5JW4gCRTACLyYaNMtE87t9mVh7pNE9FpBPTnuEPkoyiG",
+  "at": "2026-11-04T21:07:58.355Z"
+}

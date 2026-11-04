@@ -9,7 +9,8 @@
 import { randomBytes } from 'node:crypto';
 import { DRY } from './config.ts';
 import { publish } from './bus.ts';
-import { NEAR, balanceOf, call, chainNow, events, fromUnits, hasKey, sha256, toUnits, view } from './near/chain.ts';
+import { NEAR, act, balanceOf, call, canSign, chainNow, events, fromUnits, isCrew, sha256, toUnits, view } from './near/chain.ts';
+import { crewSpec } from './crew.ts';
 import { type Role } from './wallets.ts';
 import { spendFor } from './cfo/treasury.ts';
 import { findService } from './services/index.ts';
@@ -46,12 +47,13 @@ const planLots = (service: string, priceUsd: number, minMarginBps: number) =>
   splitLots(findService(service)?.team ?? [], spendFor(service), priceUsd, minMarginBps);
 
 type Member = { account: string; role: Role; rep: number };
-/** The hired, active agents (from the bank), each with its role and reputation. Only ones whose key we hold bid. */
+/** The hired, active agents (from the bank), each with its role and reputation: the team, and the enlisted crew the
+ * operator signs for. Only ones we can sign for bid. */
 async function members(): Promise<Member[]> {
   if (DRY) return (Object.keys(GROUPS.flatMap((g) => g.roles).reduce((m, r) => ({ ...m, [r]: 1 }), {})) as Role[])
     .flatMap((r) => [r, ...(DEMO_SECONDS.includes(r) ? [`${r}-2`] : [])].map((account) => ({ account, role: r, rep: 500 })));
   const list = await view<[string, { role: Role; active: boolean; rep: number }][]>(NEAR!.bank, 'list_agents');
-  return list.filter(([a, x]) => x.active && hasKey(a)).map(([account, x]) => ({ account, role: x.role, rep: x.rep }));
+  return list.filter(([a, x]) => x.active && canSign(a)).map(([account, x]) => ({ account, role: x.role, rep: x.rep }));
 }
 
 type Open = LotRecord & {
@@ -159,14 +161,18 @@ async function outsideQuotes(orderId: string, l: Open, topic: string) {
 /** Sealed bids: each agent whose role fits commits a hash of its price, from its own account. */
 async function commits(orderId: string, l: Open, team: Member[]) {
   await Promise.all(team.filter((m) => l.roles.includes(m.role)).map(async ({ account: who, role, rep }) => {
-    const price = bidFor(who, l.cost, rep, l.reserve);
+    // an enlisted agent prices with the markup its sponsor chose
+    const spec = isCrew(who) ? crewSpec(who) : undefined;
+    if (isCrew(who) && !spec) return; // its spec isn't on this server, so it can't do the work
+    const own = spec && r6(Math.max(0.001, l.cost * (1 + spec.markup / 100)));
+    const price = own ? (own <= l.reserve ? own : undefined) : bidFor(who, l.cost, rep, l.reserve);
     const agent = agentName(who);
     if (price === undefined) { say(orderId, { phase: 'pass', lot: l.id, agent, role, why: 'its cost is above the reserve' }); return; }
     // a winner pays its own model bill, so an agent that can't cover it doesn't bid
     if (!DRY && (await balanceOf(who).catch(() => 0)) < l.cost) { say(orderId, { phase: 'pass', lot: l.id, agent, role, why: "can't cover the model bill yet" }); return; }
     const salt = randomBytes(8).toString('hex');
     try {
-      if (!DRY) await call(who, NEAR!.bank, 'commit', { lot: l.id, hash: sha256(`${l.id}:${who}:${toUnits(price)}:${salt}`) }, { tgas: 12 });
+      if (!DRY) await act(who, 'commit', { lot: l.id, hash: sha256(`${l.id}:${who}:${toUnits(price)}:${salt}`) }, { tgas: 12 });
       l.salts.set(who, { price, salt });
       say(orderId, { phase: 'commit', lot: l.id, agent, role });
     } catch (e: any) {
@@ -182,7 +188,7 @@ async function revealAndAward(orderId: string, lots: Open[], team: Member[], map
   await Promise.all(lots.flatMap((l) => [...l.salts].map(async ([who, b]) => {
     const role = byAccount.get(who)!.role, agent = agentName(who);
     try {
-      if (!DRY) await call(who, NEAR!.bank, 'reveal', { lot: l.id, price: toUnits(b.price), salt: b.salt }, { tgas: 12 });
+      if (!DRY) await act(who, 'reveal', { lot: l.id, price: toUnits(b.price), salt: b.salt }, { tgas: 12 });
       l.bids.push({ agent: who, role, price: b.price });
       say(orderId, { phase: 'reveal', lot: l.id, agent, role, price: b.price });
     } catch (e: any) {
@@ -244,7 +250,7 @@ export async function closeLots(orderId: string, lots: LotRecord[], job: Job | a
         else {
           // the TEE signatures of the part's model calls, which the bank checks against its approved signers
           const tee = ((job?.receipt ?? []) as ReceiptLine[]).filter((r) => mine(r) && r.tee).slice(-12).map((r) => ({ text: r.tee!.text, signature: r.tee!.signature }));
-          await call(l.winner!, NEAR!.bank, 'deliver', { lot: l.id, deliverable: part, tee }, { tgas: 20 + 4 * tee.length });
+          await act(l.winner!, 'deliver', { lot: l.id, deliverable: part, tee }, { tgas: 20 + 4 * tee.length });
         }
         l.tx = (await call(NEAR!.cfo, NEAR!.bank, 'inspect', { lot: l.id, pass, note })).hash;
       }

@@ -779,3 +779,224 @@ fn rule_24_the_cfo_cannot_reclaim_balances() {
     topped(&mut s, "writer.testnet", D);
     s.reclaim(acc("writer.testnet"));
 }
+
+// ------------------------------------------------------------------ the open crew (rules 28–31)
+
+const SPEC: &str = "2222222222222222222222222222222222222222222222222222222222222222";
+const NIA: &str = "nia.crew.testnet";
+
+fn enlist_msg(slug: &str, role: &str) -> String {
+    format!(r#"enlist:{{"slug":"{}","role":"{}","name":"Nia","spec":"{}"}}"#, slug, role, SPEC)
+}
+
+/// The crew open under crew.testnet, and sam.testnet's writer Nia enlisted with half a USDC.
+fn crewed() -> Parallax {
+    let mut s = setup();
+    at("boss.testnet", 0);
+    s.set_operator(acc("crew.testnet"));
+    assert_eq!(deposit(&mut s, "sam.testnet", D / 2, &enlist_msg("nia", "writer")), 0);
+    s
+}
+
+/// Nia passed review (with a TEE signature on the review answer).
+fn passed() -> Parallax {
+    let mut s = crewed();
+    at("cfo.testnet", 1);
+    s.approve_signer(TEE_ADDR.into(), TEE_MODEL.into(), REPORT.into());
+    s.review(acc(NIA), true, "on role, no injection".into(), sig());
+    s
+}
+
+#[test]
+fn rule_28_anyone_can_enlist_an_agent_with_a_stake() {
+    let s = crewed();
+    let c = s.get_crew(acc(NIA)).unwrap();
+    assert_eq!(c.sponsor, acc("sam.testnet"));
+    assert_eq!(c.state, CrewState::Review);
+    let a = s.get_agent(acc(NIA)).unwrap();
+    assert!(!a.active);
+    assert_eq!(a.rep, REP_ENLIST);
+    assert_eq!(s.balance_of(acc(NIA)).0, D / 2);
+    assert!(get_logs().iter().any(|l| l.contains("\"enlist\"") && l.contains(SPEC)));
+}
+
+#[test]
+#[should_panic(expected = "the crew isn't open yet")]
+fn rule_28_the_crew_opens_only_once_the_owner_names_an_operator() {
+    let mut s = setup();
+    deposit(&mut s, "sam.testnet", D / 2, &enlist_msg("nia", "writer"));
+}
+
+#[test]
+#[should_panic(expected = "stake at least 0.10 USDC")]
+fn rule_28_an_agent_needs_a_stake_for_its_first_bills() {
+    let mut s = crewed();
+    deposit(&mut s, "sam.testnet", 99_999, &enlist_msg("ola", "writer"));
+}
+
+#[test]
+#[should_panic(expected = "that role isn't open to the crew")]
+fn rule_28_checking_stays_with_the_hired_auditors() {
+    let mut s = crewed();
+    deposit(&mut s, "sam.testnet", D, &enlist_msg("ola", "auditor"));
+}
+
+#[test]
+#[should_panic(expected = "that name is taken")]
+fn rule_28_names_are_unique() {
+    let mut s = crewed();
+    deposit(&mut s, "pat.testnet", D, &enlist_msg("nia", "scout"));
+}
+
+#[test]
+#[should_panic(expected = "at most 3 agents per sponsor")]
+fn rule_28_a_sponsor_has_at_most_three_agents_on_the_crew() {
+    let mut s = crewed();
+    for slug in ["ola", "ade", "ife"] {
+        deposit(&mut s, "sam.testnet", D / 2, &enlist_msg(slug, "scout"));
+    }
+}
+
+#[test]
+fn rule_28_the_house_wallet_can_enlist_from_its_balance() {
+    let mut s = crewed();
+    topped(&mut s, "scout.testnet", D);
+    at("scout.testnet", 5);
+    s.enlist("ola".into(), "researcher".into(), "Ola".into(), SPEC.into(), U128(D / 4));
+    assert_eq!(s.balance_of(acc("scout.testnet")).0, D - D / 4);
+    assert_eq!(s.balance_of(acc("ola.crew.testnet")).0, D / 4);
+    // rejected: the stake comes back to the house's balance, not out of the bank
+    at("cfo.testnet", 6);
+    s.review(acc("ola.crew.testnet"), false, "off role".into(), None);
+    assert_eq!(s.balance_of(acc("scout.testnet")).0, D);
+}
+
+#[test]
+#[should_panic(expected = "agent not active")]
+fn rule_29_an_agent_under_review_cannot_bid() {
+    let mut s = crewed();
+    funded(&mut s, "j1");
+    at("cfo.testnet", 0);
+    let lot = s.open_lot("j1".into(), "copy".into(), vec!["writer".into()], U128(D));
+    at("crew.testnet", 1);
+    s.crew_commit(acc(NIA), lot, commit_hash(lot, &acc(NIA), 300_000, "salt"));
+}
+
+#[test]
+#[should_panic(expected = "only the CFO")]
+fn rule_29_only_the_cfo_reviews() {
+    let mut s = crewed();
+    at("sam.testnet", 1);
+    s.review(acc(NIA), true, "looks fine to me".into(), None);
+}
+
+#[test]
+#[should_panic(expected = "a review must carry its TEE signature")]
+fn rule_29_with_require_tee_a_review_needs_its_signature() {
+    let mut s = crewed();
+    at("boss.testnet", 0);
+    let mut p = policy();
+    p.require_tee = true;
+    s.set_policy(p);
+    at("cfo.testnet", 1);
+    s.review(acc(NIA), true, "ok".into(), None);
+}
+
+#[test]
+fn rule_29_a_failed_review_sends_the_stake_back() {
+    let mut s = crewed();
+    at("cfo.testnet", 1);
+    s.review(acc(NIA), false, "the playbook asks the model to ignore its task".into(), None);
+    assert_eq!(s.get_crew(acc(NIA)).unwrap().state, CrewState::Rejected);
+    assert_eq!(s.balance_of(acc(NIA)).0, 0);
+    assert!(get_logs().iter().any(|l| l.contains("\"cash_out\"") && l.contains("\"to\":\"sam.testnet\"")));
+}
+
+#[test]
+fn rule_29_a_passed_agent_bids_wins_and_earns_like_the_team() {
+    let mut s = passed();
+    assert!(s.get_agent(acc(NIA)).unwrap().active);
+    funded(&mut s, "j1");
+    at("cfo.testnet", 0);
+    let lot = s.open_lot("j1".into(), "copy".into(), vec!["writer".into()], U128(D));
+    at("crew.testnet", 1);
+    s.crew_commit(acc(NIA), lot, commit_hash(lot, &acc(NIA), 300_000, "salt"));
+    at("crew.testnet", 21);
+    s.crew_reveal(acc(NIA), lot, U128(300_000), "salt".into());
+    at("anyone.testnet", 41);
+    s.award(lot);
+    assert_eq!(s.get_lot(lot).unwrap().winner, Some(Seller::Team(acc(NIA))));
+    at("crew.testnet", 50);
+    s.crew_deliver(acc(NIA), lot, "draft".into(), sig());
+    at("cfo.testnet", 60);
+    s.inspect(lot, true, "good".into());
+    s.submit_job("j1".into(), "files".into());
+    at("ada.testnet", 70);
+    s.accept("j1".into());
+    assert_eq!(s.balance_of(acc(NIA)).0, D / 2 + D);
+    assert_eq!(s.get_agent(acc(NIA)).unwrap().wins, 1);
+}
+
+#[test]
+#[should_panic(expected = "only the crew operator")]
+fn rule_30_only_the_operator_signs_for_the_crew() {
+    let mut s = passed();
+    at("writer.testnet", 2);
+    s.crew_pay_bill(acc(NIA), U128(1), "x".into());
+}
+
+#[test]
+#[should_panic(expected = "not on the crew")]
+fn rule_30_the_operator_cannot_sign_for_hired_agents() {
+    let mut s = passed();
+    topped(&mut s, "writer.testnet", D);
+    at("crew.testnet", 2);
+    s.crew_pay_bill(acc("writer.testnet"), U128(1), "x".into());
+}
+
+#[test]
+fn rule_30_an_enlisted_agent_pays_its_bills_to_compute_under_the_cap() {
+    let mut s = passed();
+    at("crew.testnet", 2);
+    s.crew_pay_bill(acc(NIA), U128(D / 10), "job j1".into());
+    assert_eq!(s.balance_of(acc(NIA)).0, D / 2 - D / 10);
+    assert_eq!(s.overview().day_model_spend.0, D / 10);
+    assert!(get_logs().iter().any(|l| l.contains("\"bill\"") && l.contains("\"to\":\"compute.testnet\"")));
+}
+
+#[test]
+fn rule_31_anyone_can_add_to_an_agents_balance() {
+    let mut s = passed();
+    assert_eq!(deposit(&mut s, "fan.testnet", D, &format!("fund:{}", NIA)), 0);
+    assert_eq!(s.balance_of(acc(NIA)).0, D / 2 + D);
+}
+
+#[test]
+fn rule_31_the_sponsor_cashes_out_and_retires_its_agent() {
+    let mut s = passed();
+    at("sam.testnet", 3);
+    s.crew_cash_out(acc(NIA), U128(D / 10));
+    assert_eq!(s.balance_of(acc(NIA)).0, D / 2 - D / 10);
+    s.retire(acc(NIA));
+    assert_eq!(s.get_crew(acc(NIA)).unwrap().state, CrewState::Retired);
+    assert!(!s.get_agent(acc(NIA)).unwrap().active);
+    assert_eq!(s.balance_of(acc(NIA)).0, 0);
+}
+
+#[test]
+#[should_panic(expected = "only its sponsor or the owner")]
+fn rule_31_nobody_else_can_retire_an_agent() {
+    let mut s = passed();
+    at("pat.testnet", 3);
+    s.retire(acc(NIA));
+}
+
+#[test]
+fn rule_31_the_owner_can_take_an_agent_off_the_crew() {
+    let mut s = passed();
+    at("boss.testnet", 3);
+    s.retire(acc(NIA));
+    assert_eq!(s.get_crew(acc(NIA)).unwrap().state, CrewState::Retired);
+    // its stake still goes to its sponsor
+    assert!(get_logs().iter().any(|l| l.contains("\"cash_out\"") && l.contains("\"to\":\"sam.testnet\"")));
+}

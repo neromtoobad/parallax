@@ -3,7 +3,9 @@
 // (themselves replayed from the bank's history), then compared with what the contract recorded, and each job's
 // payouts with the USDC transfers and balances it made. Each TEE signature on delivered work is recovered here
 // again, and each approved signer's attestation report is matched to the hash the bank holds; the report file
-// is the one thing read from the Parallax server, and its hash on chain is what makes that safe. Plain
+// is the one thing read from the Parallax server, and its hash on chain is what makes that safe. The same holds
+// for enlisted agents: each spec is fetched by the hash the bank holds, and each review's exact request and answer
+// are hashed against the TEE-signed text the CFO filed with its verdict. Plain
 // TypeScript, so it runs in the browser and under node (web/scripts/verify.ts).
 import { nameOf } from './team.ts';
 import { keccak256, hexToBytes, signerOf, toHex } from './ecrecover.ts';
@@ -15,6 +17,7 @@ export const NET = {
   index: 'https://tx.test.fastnear.com',
   explorer: 'https://testnet.nearblocks.io',
   reports: 'https://useparallax.xyz/api/attestation',
+  crew: 'https://useparallax.xyz/api/crew',
 };
 
 type Seller = { Team: string } | { Outside: string };
@@ -27,13 +30,15 @@ type ChainJob = { id: string; customer: string; amount: string; state: string; l
 export type Ev = { event: string; data: any; block: number };
 /** One transaction that touched the bank: its first call, and what the bank logged and the token moved. */
 export type Call = {
-  tx: string; block: number; signer: string; method: string; args: any; ok: boolean; events: Ev[];
+  // an enlisted agent's call (crew_commit and the rest) reads as the agent's own, with the operator in `via`
+  tx: string; block: number; signer: string; via?: string; method: string; args: any; ok: boolean; events: Ev[];
   transfers: { from: string; to: string; amount: bigint }[];
 };
 export type SignerRec = { model: string; report: string; by: string; active: boolean };
 export type Raw = {
   calls: Call[]; lots: ChainLot[]; jobs: ChainJob[]; agents: [string, { rep: number }][];
   signers: [string, SignerRec][]; reports: Record<string, string | null>; policy: { compute?: string; daily_model_cap?: string };
+  specs?: Record<string, string | null>; reviews?: Record<string, any | null>;
 };
 
 export type Check = { ok: boolean; what: string; detail: string; tx?: string };
@@ -100,9 +105,11 @@ async function history(say: (s: string) => void): Promise<Call[]> {
         if (o.executor_id === NET.usdc && e.event === 'ft_transfer') for (const d of e.data) transfers.push({ from: d.old_owner_id, to: d.new_owner_id, amount: BigInt(d.amount) });
       }
     }
+    const args = fc ? json(fc.args) : {}, method: string = fc?.method_name ?? Object.keys(t.transaction.actions[0] ?? {})[0] ?? '';
+    const crew = method.startsWith('crew_') && method !== 'crew_cash_out' && typeof args.agent === 'string';
     return {
-      tx: t.transaction.hash, block: t.execution_outcome.block_height, signer: t.transaction.signer_id,
-      method: fc?.method_name ?? Object.keys(t.transaction.actions[0] ?? {})[0] ?? '', args: fc ? json(fc.args) : {}, ok, events, transfers,
+      tx: t.transaction.hash, block: t.execution_outcome.block_height, signer: crew ? args.agent : t.transaction.signer_id,
+      ...(crew ? { via: t.transaction.signer_id } : {}), method: crew ? method.slice(5) : method, args, ok, events, transfers,
     };
   });
   return calls.sort((a, b) => a.block - b.block);
@@ -129,7 +136,13 @@ export async function load(say: (s: string) => void = () => {}): Promise<Raw> {
   const reports: Raw['reports'] = {};
   if (signers.length) say('Fetching the attestation reports behind the approved TEE signers');
   for (const [a, sg] of signers) reports[a] = await fetch(`${NET.reports}/${sg.report}`).then((r) => (r.ok ? r.text() : null)).catch(() => null);
-  return { calls, lots, jobs, agents, signers, reports, policy };
+  // The open crew: each enlisted agent's spec by its hash, and each review's exact request and answer.
+  const specs: Raw['specs'] = {}, reviews: Raw['reviews'] = {};
+  const enlisted = eventsOf(calls, 'enlist'), reviewed = eventsOf(calls, 'review');
+  if (enlisted.length) say('Fetching the enlisted agents\' specs and reviews');
+  for (const e of enlisted) specs[e.data.spec] = await fetch(`${NET.crew}/spec/${e.data.spec}`).then((r) => (r.ok ? r.text() : null)).catch(() => null);
+  for (const e of reviewed) reviews[e.data.agent] = await fetch(`${NET.crew}/review/${e.data.agent}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  return { calls, lots, jobs, agents, signers, reports, policy, specs, reviews };
 }
 
 /** The attestation report checks for one approved signer: the bank's hash, the key it names, and the TDX quote's binding. */
@@ -167,6 +180,7 @@ function replay(calls: Call[]) {
     if (c.method === 'new' || c.method === 'set_policy') share = c.args.policy.contributors_bps;
     if (c.method === 'hire' && !rep.has(c.args.agent)) rep.set(c.args.agent, 500);
     for (const e of c.events) {
+      if (e.event === 'enlist') rep.set(e.data.agent, 300); // enlisted agents start below a hire
       const lot = Number(e.data.lot);
       if (e.event === 'commit') setOf(sealed, lot).add(e.data.agent);
       if (e.event === 'reveal') setOf(shown, lot).add(e.data.agent);
@@ -358,8 +372,52 @@ export async function verify(raw: Raw, tamper = false): Promise<Proof> {
   }
   // 6. Every approved TEE signer's attestation report.
   for (const [a, sg] of raw.signers) checks.push(...(await reportChecks(a, sg, raw.reports[a])));
+  // 7. The open crew: specs, and reviews whose signed request and answer we can read.
+  checks.push(...(await crewChecks(calls, raw, approved)));
   const all = [...checks, ...jobs.flatMap((j) => [...j.rounds.flatMap((r) => r.checks), ...j.checks])];
   return { jobs, checks, total: all.length, passed: all.filter((c) => c.ok).length, txs: raw.calls.length };
+}
+
+/**
+ * For each enlisted agent: the spec the server serves hashes to what the bank holds and names the same agent;
+ * a review the model passed or failed carries a TEE signature from an approved signer over the exact request
+ * and answer the server publishes, the request has the whole spec in it, and the answer says what the verdict
+ * says; a rejected agent's stake went back to its sponsor in the same transaction.
+ */
+async function crewChecks(calls: Call[], raw: Raw, approved: Map<string, SignerRec>): Promise<Check[]> {
+  const out: Check[] = [];
+  const enlisted = new Map(eventsOf(calls, 'enlist').map((e) => [e.data.agent as string, e]));
+  for (const [agent, e] of enlisted) {
+    const who = `Crew ${agent.split('.')[0]}`, specRaw = raw.specs?.[e.data.spec];
+    if (!specRaw) { out.push({ ok: false, what: `${who} spec`, detail: `no spec ${e.data.spec.slice(0, 12)}… could be fetched from ${NET.crew}`, tx: e.call.tx }); continue; }
+    const h = await sha256(specRaw);
+    let sp: any = {};
+    try { sp = JSON.parse(specRaw); } catch { /* not JSON */ }
+    const same = h === e.data.spec && `${sp.slug}.${agent.split('.').slice(1).join('.')}` === agent && sp.name === e.data.name && sp.role === e.data.role;
+    out.push({ ok: same, what: `${who} spec`, detail: `sha256 of the served spec is ${h.slice(0, 16)}…, ${h === e.data.spec ? 'the same as' : 'not'} the hash enlisted; it is ${sp.name ?? '?'}, a ${sp.role ?? '?'} named ${sp.slug ?? '?'}, staked ${units(e.data.stake)} by ${e.data.sponsor}`, tx: e.call.tx });
+  }
+  for (const r of eventsOf(calls, 'review')) {
+    const agent: string = r.data.agent, who = `Crew ${agent.split('.')[0]}`, sigs: { text: string; signature: string }[] = r.call.args.tee ?? [];
+    const rec = raw.reviews?.[agent], specRaw = raw.specs?.[enlisted.get(agent)?.data.spec];
+    if (sigs.length) {
+      const t = sigs[0], signer = signerOf(t.text, t.signature), sg = signer ? approved.get(signer) : undefined;
+      const [, reqH, ansH] = t.text.slice((sg?.model.length ?? 0)).split(':');
+      out.push({ ok: !!sg && t.text.startsWith(`${sg.model}:`), what: `${who} review signed`, detail: sg ? `the verdict's model answer was signed inside NEAR AI Cloud's TEE by ${signer}, approved for ${sg.model}` : 'the review signature does not recover to an approved signer', tx: r.call.tx });
+      if (!rec?.request || !rec?.answer) { out.push({ ok: false, what: `${who} review bytes`, detail: `no review record at ${NET.crew}/review/${agent}`, tx: r.call.tx }); continue; }
+      const [rq, an] = [await sha256(rec.request), await sha256(rec.answer)];
+      let read = false, said: boolean | undefined;
+      try { read = !!specRaw && JSON.parse(rec.request).messages.some((m: any) => String(m.content).includes(specRaw)); } catch { /* bad bytes */ }
+      try { said = JSON.parse(String(JSON.parse(rec.answer).choices[0].message.content).match(/\{[\s\S]*\}/)![0]).pass === true; } catch { /* bad bytes */ }
+      out.push({ ok: rq === reqH && an === ansH, what: `${who} review bytes`, detail: `sha256 of the published request is ${rq.slice(0, 12)}… and of the answer ${an.slice(0, 12)}…; the signed text has ${reqH?.slice(0, 12)}… and ${ansH?.slice(0, 12)}…`, tx: r.call.tx });
+      out.push({ ok: read && said === r.data.pass, what: `${who} verdict`, detail: `the request ${read ? 'holds the whole spec' : 'does not hold the spec'}, and the model answered ${said === undefined ? 'nothing readable' : said ? 'pass' : 'fail'}; the CFO filed ${r.data.pass ? 'pass' : 'fail'}: "${r.data.note}"`, tx: r.call.tx });
+    } else out.push({ ok: r.data.pass === false, what: `${who} review`, detail: r.data.pass ? 'passed with no TEE-signed model answer' : `rejected before any model call: "${r.data.note}"`, tx: r.call.tx });
+    if (!r.data.pass) {
+      const sponsor = enlisted.get(agent)?.data.sponsor, back = r.call.events.find((e) => e.event === 'cash_out' && e.data.to === sponsor);
+      const moved = back && (r.call.transfers.some((t) => t.to === sponsor && t.amount === BigInt(back.data.amount)) || r.call.events.some((e) => e.event === 'credit' && e.data.agent === sponsor && e.data.amount === back.data.amount));
+      out.push({ ok: !!moved, what: `${who} stake back`, detail: moved ? `${units(back!.data.amount)} went back to its sponsor ${sponsor}` : `no stake went back to ${sponsor}`, tx: r.call.tx });
+    }
+  }
+  return out;
 }
 
 /** $0.004896 for 4896 units of 6-decimal USDC. */

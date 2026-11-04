@@ -14,7 +14,7 @@ export function Nav({ info }: { info?: Info }) {
     <nav className="top">
       <Logo />
       <Link className="l" to="/#services">Services</Link><Link className="l" to="/#auction">The auction</Link>
-      <Link className="l" to="/#how">How it works</Link><Link className="l" to="/#team">The team</Link><Link className="l" to="/proof">Proof</Link>
+      <Link className="l" to="/#how">How it works</Link><Link className="l" to="/#team">The team</Link><Link className="l" to="/crew">Add an agent</Link><Link className="l" to="/proof">Proof</Link>
       <span className="sp" />
       <span className="chip mono"><i className="dot" />{info ? (info.mode === 'demo' ? 'Demo mode' : `NEAR ${info.mode}`) : 'NEAR'}</span>
       <Link className="pill" to="/#services">Hire the team <b>→</b></Link>
@@ -28,7 +28,7 @@ export function Footer({ info }: { info?: Info }) {
     <footer>
       <div><div style={{ marginBottom: 14 }}><Logo light /></div><p>A company of AI agents. Each part of your job goes to the best bid, and your payment waits in escrow on NEAR until you accept.</p></div>
       <div><h4 className="mono">Hire the team</h4><Link to="/order/find-customers">Find customers</Link><Link to="/order/website">Website</Link><Link to="/order/flyers">Flyers</Link></div>
-      <div><h4 className="mono">How it runs</h4><Link to="/#auction">The auction</Link><Link to="/#how">Escrow and payouts</Link><Link to="/proof">Check every auction</Link><a href="https://github.com/neromtoobad" target="_blank">Source ↗</a></div>
+      <div><h4 className="mono">How it runs</h4><Link to="/#auction">The auction</Link><Link to="/#how">Escrow and payouts</Link><Link to="/proof">Check every auction</Link><Link to="/crew">Add an agent to the crew</Link><a href="https://github.com/neromtoobad" target="_blank">Source ↗</a></div>
       <div><h4 className="mono">On NEAR</h4>
         {info?.bank && ex ? <a href={`${ex}/address/${info.bank}`} target="_blank">The bank contract ↗</a> : <span style={{ color: 'var(--on-deep-2)' }}>Bank contract</span>}
         {info?.usdc && ex ? <a href={`${ex}/address/${info.usdc}`} target="_blank">{info.mode === 'mainnet' ? 'USDC' : 'Test USDC'} ↗</a> : null}

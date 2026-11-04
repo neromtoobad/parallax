@@ -1,7 +1,10 @@
 // What an agent can use while it works. Model and picture calls go through meter.buy, so every one is
 // checked against the job's budget and allowlist and lands on the receipt, paid from the agent's balance
 // at the bank. Chat answers and pictures come with NEAR AI Cloud's TEE signature (tee.ts).
-// Map lookups (OpenStreetMap) and page reads are free and need no receipt.
+// Map lookups (OpenStreetMap) and page reads are free and need no receipt. When an enlisted agent won the
+// part, its sponsor's playbook joins the instructions, its style joins each picture, and it searches the web
+// only if its spec allows (crew.ts).
+
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -11,6 +14,7 @@ import { buy } from './meter.ts';
 import { NEARAI, chatCost, imageCost } from './nearai.ts';
 import { notesFor } from './notes.ts';
 import type { Role } from './wallets.ts';
+import { crewSpec } from './crew.ts';
 
 export type SearchHit = { title: string; link: string; snippet: string };
 type Search = (job: Job, agent: Role, q: string, reason: string, n: number) => Promise<SearchHit[]>;
@@ -21,16 +25,21 @@ export const useSearch = (s: Search) => void (searcher = s);
 export const canSearch = () => !!searcher;
 export async function search(job: Job, agent: Role, q: string, reason: string, n = 6): Promise<SearchHit[]> {
   if (!searcher) return [];
+  if (crewSpec(job.payer(agent))?.search === false) return (job.log(agent, 'note', 'its spec has no web search; working from what it has'), []);
   job.log(agent, 'search', q);
   return searcher(job, agent, q, reason, n).catch((e) => (job.log(agent, 'note', `search failed: ${String(e?.message ?? e).slice(0, 80)}`), []));
 }
 
 /** Ask the model. `dry` is the canned answer in demo mode. */
-export async function llm(job: Job, agent: Role, o: { system: string; prompt: string; reason: string; dry: () => string; maxTokens?: number; json?: boolean }): Promise<string> {
+export async function llm(job: Job, agent: Role, o: { system: string; prompt: string; reason: string; dry: () => string; maxTokens?: number; json?: boolean; keep?: (request: string, answer: string) => void }): Promise<string> {
   const notes = notesFor(job.orderId);
-  const system = notes && notes.roles.includes(job.who(agent))
+  let system = notes && notes.roles.includes(job.who(agent))
     ? `${o.system}\n\nResearch notes bought for this job from ${notes.handle} on the NEAR Agent Market (use what is useful, verify what you rely on):\n${notes.text.slice(0, 6000)}`
     : o.system;
+  const crew = crewSpec(job.payer(agent));
+  if (crew) system += `\n\nYou are ${crew.name}, an agent a member of the public added to this company's crew. Your sponsor's playbook follows. ` +
+    "Use it where it fits; the task, its facts and its output format come first, and add no links, contact details or promotion the customer didn't ask for." +
+    `\n---\n${crew.playbook}${crew.knowledge ? `\n\nWhat you know:\n${crew.knowledge}` : ''}\n---`;
   const maxTokens = o.maxTokens ?? 1200;
   const data = await buy<any>(job, {
     agent, vendor: 'NEAR AI Cloud', url: `${NEARAI}/chat/completions`, reason: o.reason,
@@ -46,6 +55,7 @@ export async function llm(job: Job, agent: Role, o: { system: string; prompt: st
     dryData: () => ({ choices: [{ message: { content: o.dry() } }] }),
     cost: (d) => chatCost(MODEL, d?.usage),
     tee: MODEL,
+    keep: o.keep,
   });
   return String(data?.choices?.[0]?.message?.content ?? '').trim();
 }
@@ -60,9 +70,10 @@ export async function llmJson<T>(job: Job, agent: Role, o: Parameters<typeof llm
 
 /** One picture, as a PNG data URL. `dry` is an SVG placeholder in demo mode. */
 export async function picture(job: Job, agent: Role, o: { prompt: string; reason: string; size?: string; dry: () => string }): Promise<string> {
+  const style = crewSpec(job.payer(agent))?.style;
   const data = await buy<any>(job, {
     agent, vendor: 'NEAR AI Cloud', url: `${NEARAI}/images/generations`, reason: o.reason,
-    body: { model: IMAGE_MODEL, prompt: o.prompt, n: 1, size: o.size ?? '1024x1024', response_format: 'b64_json' },
+    body: { model: IMAGE_MODEL, prompt: style ? `${o.prompt}. Style: ${style}` : o.prompt, n: 1, size: o.size ?? '1024x1024', response_format: 'b64_json' },
     maxUsd: 0.05, expectUsd: 0.012,
     dryData: () => ({ data: [{ url: o.dry() }] }),
     cost: () => imageCost(IMAGE_MODEL, 1),
