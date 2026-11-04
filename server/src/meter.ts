@@ -1,12 +1,14 @@
 // buy(): the only way a Parallax agent spends money. On NEAR the team's paid tools are NEAR AI Cloud
 // models (and Agent Market hires, see market.ts). Before a call: the host must be on the job's
-// allowlist, the job's budget must cover it, and the agent's own NEAR account must hold enough USDC.
-// After it: the measured cost becomes a receipt line booked to that agent. settle.ts then has each
-// agent pay what it used from its own account to the compute account, one transfer per agent per job,
-// and writes that transaction onto the receipt lines. No receipt, no spend.
+// allowlist, the job's budget must cover it, and the agent's balance at the bank must hold enough USDC.
+// After it: the measured cost becomes a receipt line booked to that agent, with NEAR AI Cloud's TEE
+// signature over the exact request and answer (tee.ts). settle.ts then has each agent pay what it used
+// from its balance to the compute account with the bank's pay_bill, one call per agent per job, and
+// writes that transaction onto the receipt lines. No receipt, no spend.
 import { CANNED, DRY } from './config.ts';
 import { NEARAI_HOST, nearaiKey } from './nearai.ts';
-import { NEAR, usdcOf } from './near/chain.ts';
+import { NEAR, balanceOf } from './near/chain.ts';
+import { teeSignature, type TeeSig } from './tee.ts';
 import { type Role } from './wallets.ts';
 import type { Job } from './job.ts';
 
@@ -24,6 +26,7 @@ export type ReceiptLine = {
   account?: string; // the NEAR account that pays for it (a lot's winner may not be the role's own account)
   settledTx?: string; // the NEAR transaction in which the agent paid for it (filled in by settle.ts)
   settledAt?: string;
+  tee?: TeeSig; // NEAR AI Cloud's TEE signature over this call's request and answer
 };
 
 export class SpendRefused extends Error {}
@@ -39,11 +42,11 @@ export const unpaidUsd = (account: string) => unpaid.get(account) ?? 0;
 export function markPaid(account: string, usd: number) { unpaid.set(account, Math.max(0, unpaidUsd(account) - usd)); }
 
 const balances = new Map<string, { usd: number; at: number }>();
-/** An agent's USDC on NEAR (cached 20 s). */
+/** An agent's USDC balance at the bank (cached 20 s). */
 export async function walletUsdc(id: string): Promise<number> {
   const hit = balances.get(id);
   if (hit && Date.now() - hit.at < 20_000) return hit.usd;
-  const usd = await usdcOf(id);
+  const usd = await balanceOf(id);
   balances.set(id, { usd, at: Date.now() });
   return usd;
 }
@@ -73,6 +76,7 @@ export async function buy<T>(
     dryData: () => T;
     cost?: (data: any) => Promise<number | undefined> | number | undefined; // measured cost of the call
     form?: FormData; // multipart body instead of JSON
+    tee?: string; // the model, when the call runs in NEAR AI Cloud's TEE and is signed
   },
 ): Promise<T> {
   const account = job.payer(opts.agent); // the lot's winner does, and pays for, its part of the job
@@ -100,19 +104,22 @@ export async function buy<T>(
   const headers = auth(host);
   if (NEAR) {
     const have = (await walletUsdc(account)) - unpaidUsd(account);
-    if (have < opts.expectUsd) throw new NoWalletFunds(`${account} holds ${Math.max(0, have).toFixed(3)} USDC on NEAR; this call needs about ${opts.expectUsd.toFixed(3)}`);
+    if (have < opts.expectUsd) throw new NoWalletFunds(`${account} holds ${Math.max(0, have).toFixed(3)} USDC at the bank; this call needs about ${opts.expectUsd.toFixed(3)}`);
   }
 
-  let res: Response | undefined, data: any;
+  // Sent and read as exact bytes: the TEE signs the sha256 of each.
+  const body = opts.form ?? (opts.body === undefined ? undefined : JSON.stringify(opts.body));
+  let res: Response | undefined, data: any, raw = '';
   for (let attempt = 1; ; attempt++) {
     try {
       res = await fetch(opts.url, {
         method: opts.method ?? 'POST',
         headers: opts.form ? headers : { ...headers, 'content-type': 'application/json' },
-        body: opts.form ?? (opts.body === undefined ? undefined : JSON.stringify(opts.body)),
+        body,
         signal: AbortSignal.timeout(300_000),
       });
-      data = await res.json().catch(() => undefined);
+      raw = await res.text();
+      try { data = JSON.parse(raw); } catch { data = undefined; }
       if (res.ok) break;
       const msg = `${res.status} ${String(data?.error?.message ?? data?.error ?? data?.message ?? '').slice(0, 160)}`;
       if (attempt >= 3 || !TRANSIENT.test(msg)) throw new Error(`${opts.vendor}: ${msg}`);
@@ -126,10 +133,12 @@ export async function buy<T>(
   const measured = await opts.cost?.(data);
   const usd = Math.min(opts.maxUsd, measured ?? opts.expectUsd);
   unpaid.set(account, unpaidUsd(account) + usd);
+  const tee = opts.tee && typeof body === 'string' ? await teeSignature(String(data?.id ?? ''), opts.tee, body, raw).catch(() => undefined) : undefined;
   job.addReceipt({
     at: new Date().toISOString(), agent: opts.agent, vendor: opts.vendor, url: opts.url,
     amount: String(Math.round(usd * 1e6)), usd, transaction: String(data?.id ?? data?.created ?? 'call'),
-    reason: opts.reason, status: res!.status, dry: false, account,
+    reason: opts.reason, status: res!.status, dry: false, account, ...(tee ? { tee } : {}),
   });
+  if (opts.tee && !tee) job.log(opts.agent, 'note', `${opts.vendor}: no TEE signature for this call`);
   return data as T;
 }

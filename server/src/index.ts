@@ -15,14 +15,22 @@ import { ROSTER } from './wallets.ts';
 import { NEAR, accountUrl, view } from './near/chain.ts';
 import { registerSearch, searchOn } from './market.ts';
 import { accountOf } from './wallets.ts';
+import { attestationFile, warmTee } from './tee.ts';
 
 registerSearch();
 startTreasury();
+void warmTee();
 const app = new Hono();
 
 /** What the site may see of an order: the brief stays with the customer if the order is private. */
 const view_ = (o: Order) => ({ ...o, input: o.private ? undefined : o.input, brief: o.private ? undefined : o.brief });
 
+// The attestation report behind an approved TEE signer, by the sha256 the bank holds for it.
+app.get('/api/attestation/:hash', (c) => {
+  const raw = attestationFile(c.req.param('hash'));
+  if (!raw) return c.json({ error: 'no report with that hash' }, 404);
+  return c.body(raw, 200, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=86400' });
+});
 app.get('/api/info', (c) => c.json({
   mode: DRY ? 'demo' : NEAR?.network, model: MODEL, bank: NEAR?.bank ?? null, explorer: NEAR?.explorer ?? null,
   usdc: NEAR?.usdc ?? null, search: searchOn(), canned: DRY || CANNED, house: DRY ? null : demoPayer() || null,

@@ -13,6 +13,8 @@ COPY server/package*.json server/
 RUN cd server && npm ci --omit=dev
 COPY server/ server/
 COPY deployments/ deployments/
+# the server checks TEE signatures with the same recovery code the proof page runs
+COPY web/src/ecrecover.ts web/src/ecrecover.ts
 COPY --from=web /app/web/dist web/dist
 WORKDIR /app/server
 CMD ["node", "src/index.ts"]

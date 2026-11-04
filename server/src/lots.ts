@@ -9,11 +9,12 @@
 import { randomBytes } from 'node:crypto';
 import { DRY } from './config.ts';
 import { publish } from './bus.ts';
-import { NEAR, call, chainNow, events, fromUnits, hasKey, sha256, toUnits, usdcOf, view } from './near/chain.ts';
+import { NEAR, balanceOf, call, chainNow, events, fromUnits, hasKey, sha256, toUnits, view } from './near/chain.ts';
 import { type Role } from './wallets.ts';
 import { spendFor } from './cfo/treasury.ts';
 import { findService } from './services/index.ts';
 import type { Job } from './job.ts';
+import type { ReceiptLine } from './meter.ts';
 import { canHire, hire, receiptOf, researchQuotes } from './market.ts';
 import { award as awardRule, bidFor, goodRecord, planLots as splitLots, quality, r6, GROUPS } from './auction.ts';
 import { dropNotes, setNotes } from './notes.ts';
@@ -162,7 +163,7 @@ async function commits(orderId: string, l: Open, team: Member[]) {
     const agent = agentName(who);
     if (price === undefined) { say(orderId, { phase: 'pass', lot: l.id, agent, role, why: 'its cost is above the reserve' }); return; }
     // a winner pays its own model bill, so an agent that can't cover it doesn't bid
-    if (!DRY && (await usdcOf(who).catch(() => 0)) < l.cost) { say(orderId, { phase: 'pass', lot: l.id, agent, role, why: "can't cover the model bill yet" }); return; }
+    if (!DRY && (await balanceOf(who).catch(() => 0)) < l.cost) { say(orderId, { phase: 'pass', lot: l.id, agent, role, why: "can't cover the model bill yet" }); return; }
     const salt = randomBytes(8).toString('hex');
     try {
       if (!DRY) await call(who, NEAR!.bank, 'commit', { lot: l.id, hash: sha256(`${l.id}:${who}:${toUnits(price)}:${salt}`) }, { tgas: 12 });
@@ -240,7 +241,11 @@ export async function closeLots(orderId: string, lots: LotRecord[], job: Job | a
     try {
       if (!DRY) {
         if (String(l.winner).startsWith('outside:')) await call(NEAR!.cfo, NEAR!.bank, 'deliver_outside', { lot: l.id, deliverable: part, receipt: l.hire?.receipt ?? '' });
-        else await call(l.winner!, NEAR!.bank, 'deliver', { lot: l.id, deliverable: part }, { tgas: 12 });
+        else {
+          // the TEE signatures of the part's model calls, which the bank checks against its approved signers
+          const tee = ((job?.receipt ?? []) as ReceiptLine[]).filter((r) => mine(r) && r.tee).slice(-12).map((r) => ({ text: r.tee!.text, signature: r.tee!.signature }));
+          await call(l.winner!, NEAR!.bank, 'deliver', { lot: l.id, deliverable: part, tee }, { tgas: 20 + 4 * tee.length });
+        }
         l.tx = (await call(NEAR!.cfo, NEAR!.bank, 'inspect', { lot: l.id, pass, note })).hash;
       }
       l.status = pass ? 'passed' : 'failed';

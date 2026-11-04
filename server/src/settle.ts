@@ -1,9 +1,10 @@
-// After a job, each agent that ran model calls pays its own bill: one USDC transfer on NEAR from its
-// account to the compute account, for exactly what its receipt lines add up to.
+// After a job, each agent that ran model calls pays its own bill: one pay_bill call on the bank, from its
+// balance there to the compute account, for exactly what its receipt lines add up to. The bank holds
+// these bills to the policy's daily model cap.
 import { DRY } from './config.ts';
 import type { Job } from './job.ts';
 import { forgetBalance, markPaid } from './meter.ts';
-import { NEAR, sendUsdc, txUrl } from './near/chain.ts';
+import { NEAR, payBill, txUrl } from './near/chain.ts';
 import { publish } from './bus.ts';
 import { nameOf } from './wallets.ts';
 
@@ -16,7 +17,7 @@ export async function settleBills(job: Job) {
     const usd = Math.ceil(raw * 1e6) / 1e6;
     if (usd <= 0) continue;
     try {
-      const { hash } = await sendUsdc(account, NEAR.compute, usd, `model calls, job ${job.orderId}`);
+      const { hash } = await payBill(account, usd, `model calls, job ${job.orderId}`);
       markPaid(account, usd);
       forgetBalance(account);
       for (const r of job.receipt) if (r.account === account && !r.dry) Object.assign(r, { settledTx: hash, settledAt: new Date().toISOString() });

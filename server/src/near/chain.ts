@@ -1,11 +1,12 @@
 // NEAR: accounts, keys, signed calls and reads for Parallax's bank, its USDC and its agents.
 //
 // The deployment (accounts and contracts) is deployments/near-<net>.json, net = PARALLAX_NEAR_NET
-// (default testnet; empty in demo mode, which turns everything on-chain off).
+// (default testnet; empty in demo mode, which turns everything on-chain off), or the file PARALLAX_DEPLOYMENT.
 //
 // Keys never live in this repo. Each account's key comes from PARALLAX_NEAR_KEYS (a JSON object
 // { account: "ed25519:…" }, for hosting) or from the near-cli keychain in ~/.near-credentials/<net>.
-// The CFO's key is a function-call key that can only call the bank (cfo.<root>.bank-key.json).
+// The CFO, the agents and the house wallet sign with function-call keys that can only call the bank
+// (<account>.bank-key.json): no call of theirs attaches a deposit, so none of them needs a full-access key.
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -33,7 +34,7 @@ export type Deployment = {
 
 function load(): Deployment | null {
   if (!NET) return null;
-  const f = new URL(`../../../deployments/near-${NET}.json`, import.meta.url).pathname;
+  const f = process.env.PARALLAX_DEPLOYMENT ?? new URL(`../../../deployments/near-${NET}.json`, import.meta.url).pathname;
   return existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : null;
 }
 export const NEAR = load();
@@ -242,6 +243,11 @@ export async function usdcOf(id: string): Promise<number> {
   return fromUnits(await view<string>(NEAR!.usdc, 'ft_balance_of', { account_id: id }));
 }
 
+/** What an agent (or the house wallet) holds inside the bank. */
+export async function balanceOf(id: string): Promise<number> {
+  return fromUnits(await view<string>(NEAR!.bank, 'balance_of', { account: id }));
+}
+
 /** Logs from a transaction someone else sent (a customer's wallet), with its outcome. */
 export async function txLogs(hash: string, sender: string): Promise<{ ok: boolean; logs: string[]; block: number } | null> {
   try {
@@ -270,9 +276,9 @@ export function events(logs: string[], name?: string): { event: string; data: an
 
 // ---------------------------------------------------------------- USDC
 
-/** Send USDC from an account we hold the key for (an agent paying for its own work). */
-export const sendUsdc = (from: string, to: string, usd: number, memo: string) =>
-  call(from, NEAR!.usdc, 'ft_transfer', { receiver_id: to, amount: toUnits(usd), memo: memo.slice(0, 120) }, { deposit: 1n, tgas: 15 });
+/** An agent pays a model bill from its balance at the bank; the bank sends it to the compute account. */
+export const payBill = (agent: string, usd: number, memo: string) =>
+  call(agent, NEAR!.bank, 'pay_bill', { amount: toUnits(usd), memo: memo.slice(0, 120) }, { tgas: 40 });
 
 /** Send USDC into the bank with a message (a deposit, or `job:<id>` to fund a job). */
 export const payBank = (from: string, usd: number, msg: string) =>

@@ -2,7 +2,12 @@
 // Needs node 22.18 or newer, no install and no keys:
 //   node web/scripts/verify.ts            every check, then the tally
 //   node web/scripts/verify.ts --tamper   change one revealed bid by $0.000001 first, to watch a check fail
-import { load, verify } from '../src/proof.ts';
+//   PARALLAX_BANK=bank.x.testnet PARALLAX_USDC=usdc.x.testnet PARALLAX_REPORTS=http://localhost:8790/api/attestation …   another bank
+import { NET, load, verify } from '../src/proof.ts';
+
+NET.bank = process.env.PARALLAX_BANK ?? NET.bank;
+NET.usdc = process.env.PARALLAX_USDC ?? NET.usdc;
+NET.reports = process.env.PARALLAX_REPORTS ?? NET.reports;
 
 const tamper = process.argv.includes('--tamper');
 const p = await verify(await load((s) => process.stderr.write(`${s}\n`)), tamper);

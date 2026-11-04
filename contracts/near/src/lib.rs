@@ -6,7 +6,10 @@
 //!    moves money between buckets and funds agents inside the owner's policy;
 //!    anything bigger is a proposal the owner co-signs. A kill switch stops
 //!    the agents at once, and every accepted job sends a fixed share of its
-//!    margin to the contributors' account.
+//!    margin to the contributors' account. Agents keep what they're given and
+//!    earn as balances inside the bank and pay their model bills from there,
+//!    only to the compute account and inside a daily cap, so an agent's key
+//!    never needs to move tokens itself: a function-call key on the bank is enough.
 //! 2. **Job escrow.** A customer funds a quoted job with `ft_transfer_call`.
 //!    The money is released only when the customer accepts (or stays silent
 //!    past the window). A rejection or a missed deadline refunds the price and
@@ -16,6 +19,9 @@
 //!    lowest price per quality wins, and a team winner is paid the runner-up's
 //!    price (Vickrey), capped by the lot's reserve. The CFO's inspector passes
 //!    or fails the work; a fail re-auctions the lot without that seller.
+//!    Team work carries NEAR AI Cloud's TEE signatures over the exact request
+//!    and answer; the bank recovers each signer and takes the work only from
+//!    an approved signer for that model.
 //!
 //! RULES.md is the plain-language version.
 
@@ -26,6 +32,7 @@ use near_sdk::{
     env, ext_contract, near, require, AccountId, Gas, NearToken, PanicOnDefault, PromiseError, PromiseOrValue,
 };
 
+mod migrate;
 #[cfg(test)]
 mod tests;
 
@@ -92,6 +99,31 @@ pub struct Policy {
     /// The shortest a week can be: the CFO can't open the next one sooner, so it can't reset
     /// epoch_tool_budget and promo_cap early.
     pub epoch_secs: u32,
+    /// The only account model bills are paid to.
+    pub compute: AccountId,
+    /// Cap on model bills paid per day, across all agents.
+    pub daily_model_cap: U128,
+    /// Team work must carry TEE signatures from an approved signer.
+    pub require_tee: bool,
+}
+
+/// A NEAR AI Cloud signing key, approved for one model with the hash of its attestation report.
+#[near(serializers = [borsh, json])]
+#[derive(Clone)]
+pub struct Signer {
+    pub model: String,
+    /// sha256 of the attestation report (Intel TDX quote and NVIDIA evidence) that names this address.
+    pub report: String,
+    pub by: AccountId,
+    pub active: bool,
+}
+
+/// What NEAR AI Cloud returns from /v1/signature: `text` is "model:sha256(request):sha256(answer)".
+#[near(serializers = [borsh, json])]
+#[derive(Clone)]
+pub struct TeeSig {
+    pub text: String,
+    pub signature: String,
 }
 
 #[near(serializers = [borsh, json])]
@@ -240,6 +272,9 @@ pub struct Overview {
     pub epoch_allocated: U128,
     pub epoch_promo: U128,
     pub day_lot_spend: U128,
+    /// What agents (and the house wallet) hold inside the bank.
+    pub held: U128,
+    pub day_model_spend: U128,
     pub agents: u32,
     pub jobs: u32,
     pub lots: u32,
@@ -273,6 +308,11 @@ pub struct Parallax {
     /// Transfers that failed (e.g. the receiver has no storage on the token), claimable later.
     owed: IterableMap<AccountId, u128>,
     owed_total: u128,
+    /// Each agent's money inside the bank: top-ups and lot pay in, model bills and job payments out.
+    balances: IterableMap<AccountId, u128>,
+    held: u128,
+    day_model_spend: u128,
+    signers: IterableMap<String, Signer>,
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -301,6 +341,27 @@ fn check_policy(p: &Policy) {
     require!(p.commit_secs > 0 && p.reveal_secs > 0, "bidding windows must be positive");
     require!(p.accept_secs > 0 && p.revision_secs > 0, "job windows must be positive");
     require!(p.epoch_secs > 0, "a week must have a length");
+    require!(p.daily_model_cap.0 > 0, "model bills need a daily cap");
+}
+
+/// The address behind a personal_sign (EIP-191) signature over `text`, as 0x + 40 lowercase hex.
+pub fn tee_signer(text: &str, signature: &str) -> Option<String> {
+    let sig = unhex(signature.strip_prefix("0x").unwrap_or(signature))?;
+    if sig.len() != 65 {
+        return None;
+    }
+    let v = if sig[64] >= 27 { sig[64] - 27 } else { sig[64] };
+    let mut msg = format!("\x19Ethereum Signed Message:\n{}", text.len()).into_bytes();
+    msg.extend_from_slice(text.as_bytes());
+    let public = env::ecrecover(&env::keccak256_array(&msg), &sig[..64], v, true)?;
+    Some(format!("0x{}", hex(&env::keccak256_array(&public)[12..])))
+}
+
+fn unhex(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok()).collect()
 }
 
 fn seller_key(s: &Seller) -> String {
@@ -338,6 +399,10 @@ impl Parallax {
             proposals: Vector::new(b"p"),
             owed: IterableMap::new(b"o"),
             owed_total: 0,
+            balances: IterableMap::new(b"b"),
+            held: 0,
+            day_model_spend: 0,
+            signers: IterableMap::new(b"s"),
         }
     }
 
@@ -349,21 +414,15 @@ impl Parallax {
     pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String) -> PromiseOrValue<U128> {
         require!(env::predecessor_account_id() == self.usdc, "only USDC");
         if let Some(id) = msg.strip_prefix("job:") {
-            let mut j = match self.jobs.get(id).cloned() {
-                Some(j) => j,
-                None => return PromiseOrValue::Value(amount),
-            };
-            let now = env::block_timestamp();
-            if j.state != JobState::Open || now > j.fund_by.0 || amount.0 < j.amount.0 {
-                emit("fund_refused", json!({"job": id, "from": sender_id, "amount": amount}));
-                return PromiseOrValue::Value(amount);
-            }
-            j.state = JobState::Funded;
-            self.escrowed += j.amount.0;
-            let extra = amount.0 - j.amount.0;
-            emit("funded", json!({"job": id, "payer": sender_id, "amount": j.amount}));
-            self.jobs.insert(id.to_string(), j);
-            return PromiseOrValue::Value(U128(extra));
+            return PromiseOrValue::Value(U128(match self.fund(id, &sender_id, amount.0, "token") {
+                Some(price) => amount.0 - price,
+                None => amount.0,
+            }));
+        }
+        // An agent putting its own USDC into its balance at the bank.
+        if msg == "balance" && self.agents.get(&sender_id).is_some() {
+            self.credit(&sender_id, amount.0, "deposit");
+            return PromiseOrValue::Value(U128(0));
         }
         self.buckets[Bucket::Operating.i()] += amount.0;
         emit("deposit", json!({"from": sender_id, "amount": amount, "memo": msg}));
@@ -420,7 +479,7 @@ impl Parallax {
         emit("allowance", json!({"agent": agent, "epoch": U64(self.epoch), "amount": U128(amount)}));
     }
 
-    /// Fund an agent's own account from TOOLS so it can pay for its inference and hires.
+    /// Fund an agent's balance at the bank from TOOLS so it can pay for its model calls.
     pub fn top_up(&mut self, agent: AccountId, amount: U128, reason: String) {
         self.only_cfo();
         self.alive();
@@ -431,7 +490,30 @@ impl Parallax {
         a.topped_up = U128(a.topped_up.0 + amount.0);
         self.agents.insert(agent.clone(), a);
         emit("top_up", json!({"agent": agent, "epoch": U64(self.epoch), "amount": amount, "reason": reason}));
-        self.pay_out(agent, amount.0, "top_up");
+        self.credit(&agent, amount.0, "top_up");
+    }
+
+    /// Approve a NEAR AI Cloud signing key for one model. `report` is the sha256 of the attestation
+    /// report that names the address, published so anyone can check the TEE quote behind it.
+    pub fn approve_signer(&mut self, address: String, model: String, report: String) {
+        let by = env::predecessor_account_id();
+        require!(by == self.owner || by == self.cfo, "only the owner or the CFO");
+        let address = address.to_lowercase();
+        require!(address.len() == 42 && address.starts_with("0x") && unhex(&address[2..]).is_some(), "address must be 0x and 40 hex");
+        require!(!model.is_empty() && !model.contains(':'), "bad model name");
+        require!(report.len() == 64 && unhex(&report).is_some(), "report must be a sha256 hex");
+        self.signers.insert(address.clone(), Signer { model: model.clone(), report: report.clone(), by: by.clone(), active: true });
+        emit("signer", json!({"address": address, "model": model, "report": report, "by": by}));
+    }
+
+    pub fn revoke_signer(&mut self, address: String) {
+        let by = env::predecessor_account_id();
+        require!(by == self.owner || by == self.cfo, "only the owner or the CFO");
+        let address = address.to_lowercase();
+        let mut sg = self.signers.get(&address).cloned().unwrap_or_else(|| env::panic_str("no such signer"));
+        sg.active = false;
+        self.signers.insert(address.clone(), sg);
+        emit("signer_revoked", json!({"address": address, "by": by}));
     }
 
     pub fn propose(&mut self, kind: Kind, who: Option<AccountId>, amount: U128, reason: String) -> u64 {
@@ -440,6 +522,46 @@ impl Parallax {
         self.proposals.push(Proposal { id, kind: kind.clone(), who: who.clone(), amount, reason: reason.clone(), done: false });
         emit("proposed", json!({"id": U64(id), "kind": kind, "who": who, "amount": amount, "reason": reason}));
         id
+    }
+
+    // ============================================================ agents: money in the bank
+
+    /// An agent pays for its model calls from its balance. The money goes only to the policy's
+    /// compute account, and all agents' bills together stay inside daily_model_cap.
+    pub fn pay_bill(&mut self, amount: U128, memo: String) {
+        self.alive();
+        let me = env::predecessor_account_id();
+        self.agent(&me);
+        require!(amount.0 > 0, "nothing to pay");
+        self.roll_day();
+        require!(self.day_model_spend + amount.0 <= self.policy.daily_model_cap.0, "daily model cap reached");
+        self.day_model_spend += amount.0;
+        self.debit(&me, amount.0);
+        let to = self.policy.compute.clone();
+        emit("bill", json!({"agent": me, "to": to, "amount": amount, "memo": memo, "day_model_spend": U128(self.day_model_spend)}));
+        self.pay_out(to, amount.0, "model calls");
+    }
+
+    /// An agent (the house wallet) funds a quoted job from its balance: exactly the price.
+    pub fn pay_job(&mut self, id: String) {
+        self.alive();
+        let me = env::predecessor_account_id();
+        self.agent(&me);
+        let price = self.job(&id).amount.0;
+        self.debit(&me, price);
+        if self.fund(&id, &me, price, "balance").is_none() {
+            env::panic_str("this job can't be funded now");
+        }
+    }
+
+    /// An agent takes money from its balance to its own account.
+    pub fn cash_out(&mut self, amount: U128) {
+        self.alive();
+        let me = env::predecessor_account_id();
+        self.agent(&me);
+        self.debit(&me, amount.0);
+        emit("cash_out", json!({"agent": me, "amount": amount}));
+        self.pay_out(me, amount.0, "cash_out");
     }
 
     // ============================================================ owner
@@ -493,6 +615,15 @@ impl Parallax {
         self.only_owner();
         self.owner = owner.clone();
         emit("owner", json!({"owner": owner}));
+    }
+
+    /// The owner moves an agent's whole balance at the bank back into OPERATING (after firing it, or to close the bank).
+    pub fn reclaim(&mut self, agent: AccountId) {
+        self.only_owner();
+        let amount = self.balances.get(&agent).copied().unwrap_or(0);
+        self.debit(&agent, amount);
+        self.buckets[Bucket::Operating.i()] += amount;
+        emit("reclaim", json!({"agent": agent, "amount": U128(amount)}));
     }
 
     /// The owner can take money out, but never the money backing customers' bonds.
@@ -769,17 +900,29 @@ impl Parallax {
         emit("reopen", json!({"lot": U64(lot), "round": round}));
     }
 
-    /// A team winner files its work (the hash of its files).
-    pub fn deliver(&mut self, lot: u64, deliverable: String) {
+    /// A team winner files its work (the hash of its files) with NEAR AI Cloud's TEE signatures over
+    /// its model calls. Each must recover to an approved signer whose model the signed text names.
+    pub fn deliver(&mut self, lot: u64, deliverable: String, tee: Option<Vec<TeeSig>>) {
         self.alive();
         let me = env::predecessor_account_id();
         let mut l = self.lot(lot);
         require!(l.status == LotStatus::Awarded, "not awarded");
         require!(l.winner == Some(Seller::Team(me.clone())), "not the winner");
+        let tee = tee.unwrap_or_default();
+        require!(tee.len() <= 12, "at most 12 signatures");
+        require!(!self.policy.require_tee || !tee.is_empty(), "team work must carry TEE signatures");
+        let mut signed = vec![];
+        for t in tee.iter() {
+            let who = tee_signer(&t.text, &t.signature).unwrap_or_else(|| env::panic_str("a TEE signature doesn't recover"));
+            let sg = self.signers.get(&who).filter(|s| s.active).unwrap_or_else(|| env::panic_str("signed by a key the bank hasn't approved"));
+            let parts: Vec<&str> = t.text.rsplitn(3, ':').collect();
+            require!(parts.len() == 3 && parts[2] == sg.model && parts[0].len() == 64 && parts[1].len() == 64, "the signed text isn't model:request:answer for this signer's model");
+            signed.push(json!({"signer": who, "text": t.text}));
+        }
         l.status = LotStatus::Submitted;
         l.deliverable = deliverable.clone();
         self.lots.replace(lot as u32, l);
-        emit("deliver", json!({"lot": U64(lot), "by": me, "deliverable": deliverable}));
+        emit("deliver", json!({"lot": U64(lot), "by": me, "deliverable": deliverable, "tee": signed}));
     }
 
     /// The CFO files an outside agent's work with its payment receipt.
@@ -868,6 +1011,8 @@ impl Parallax {
             epoch_allocated: U128(self.epoch_allocated),
             epoch_promo: U128(self.epoch_promo),
             day_lot_spend: U128(self.day_lot_spend),
+            held: U128(self.held),
+            day_model_spend: U128(self.day_model_spend),
             agents: self.agents.len(),
             jobs: self.jobs.len(),
             lots: self.lots.len(),
@@ -907,6 +1052,18 @@ impl Parallax {
         (from..(from + limit).min(self.proposals.len() as u64))
             .filter_map(|i| self.proposals.get(i as u32).cloned())
             .collect()
+    }
+
+    pub fn balance_of(&self, account: AccountId) -> U128 {
+        U128(self.balances.get(&account).copied().unwrap_or(0))
+    }
+
+    pub fn list_balances(&self) -> Vec<(AccountId, U128)> {
+        self.balances.iter().map(|(a, b)| (a.clone(), U128(*b))).collect()
+    }
+
+    pub fn list_signers(&self) -> Vec<(String, Signer)> {
+        self.signers.iter().map(|(a, s)| (a.clone(), s.clone())).collect()
     }
 
     pub fn owed_to(&self, account: AccountId) -> U128 {
@@ -965,7 +1122,41 @@ impl Parallax {
         if d != self.day {
             self.day = d;
             self.day_lot_spend = 0;
+            self.day_model_spend = 0;
         }
+    }
+
+    fn credit(&mut self, to: &AccountId, amount: u128, what: &str) {
+        if amount == 0 {
+            return;
+        }
+        let b = self.balances.get(to).copied().unwrap_or(0) + amount;
+        self.balances.insert(to.clone(), b);
+        self.held += amount;
+        emit("credit", json!({"agent": to, "amount": U128(amount), "what": what, "balance": U128(b)}));
+    }
+
+    fn debit(&mut self, from: &AccountId, amount: u128) {
+        let b = self.balances.get(from).copied().unwrap_or(0);
+        require!(b >= amount, "balance too low");
+        self.balances.insert(from.clone(), b - amount);
+        self.held -= amount;
+    }
+
+    /// Fund an open job with `amount` (at least its price). Returns the price taken, or None if refused.
+    fn fund(&mut self, id: &str, payer: &AccountId, amount: u128, from: &str) -> Option<u128> {
+        let mut j = self.jobs.get(id).cloned()?;
+        let now = env::block_timestamp();
+        if j.state != JobState::Open || now > j.fund_by.0 || amount < j.amount.0 {
+            emit("fund_refused", json!({"job": id, "from": payer, "amount": U128(amount)}));
+            return None;
+        }
+        j.state = JobState::Funded;
+        self.escrowed += j.amount.0;
+        let price = j.amount.0;
+        emit("funded", json!({"job": id, "payer": payer, "amount": j.amount, "from": from}));
+        self.jobs.insert(id.to_string(), j);
+        Some(price)
     }
 
     fn restart(&self, l: &mut Lot) {
@@ -1036,7 +1227,7 @@ impl Parallax {
         emit("fire", json!({"agent": agent}));
     }
 
-    /// Accepted: pay team winners their lot pay, send the contributors their share
+    /// Accepted: credit team winners' balances with their lot pay, send the contributors their share
     /// of the margin, and keep the rest in OPERATING. Outside winners were paid on
     /// the Agent Market by the hiring agent, so their pay refills TOOLS.
     fn release(&mut self, mut j: Job, auto: bool) {
@@ -1069,7 +1260,7 @@ impl Parallax {
             let mut ag = self.agent(&a);
             ag.earned = U128(ag.earned.0 + pay);
             self.agents.insert(a.clone(), ag);
-            self.pay_out(a, pay, "lot");
+            self.credit(&a, pay, "lot");
         }
         if contributors > 0 {
             self.pay_out(self.policy.contributors.clone(), contributors, "contributors");

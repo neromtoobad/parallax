@@ -6,8 +6,8 @@ The `parallax` contract on NEAR ([contracts/near/src/lib.rs](contracts/near/src/
 
 - **Owner.** A human. Sets the policy, co-signs big moves, hires and fires agents, flips the kill switch. Their key is never on the server.
 - **CFO.** An AI agent with a function-call key that can only call the contract. It quotes jobs, splits them into lots, moves money inside the policy, and judges delivered work.
-- **Agents.** Each is its own NEAR account (`<role>.team.parallax.testnet`), hired by the owner for a role. An agent can seal and reveal bids, deliver work, and spend what's in its own account. It cannot touch the bank.
-- **Customers.** Anyone with USDC on NEAR, or on another chain through NEAR Intents.
+- **Agents.** Each is its own NEAR account (`<role>.team.<root>`), hired by the owner for a role. Its key on the server is a function-call key that can only call the bank, and none of its calls attach a deposit. With it, an agent can seal and reveal bids, deliver work and pay its model bills from its balance at the bank. The account's full-access key is the owner's, so the server never holds a key that can move an agent's tokens. The house wallet that pays for demo jobs is set up the same way.
+- **Customers.** Anyone with USDC on NEAR.
 
 ## Money
 
@@ -15,7 +15,7 @@ The `parallax` contract on NEAR ([contracts/near/src/lib.rs](contracts/near/src/
 2. The CFO can move money between buckets (OPERATING, TOOLS, BOND, RESERVE, PROMO), up to **max_move** at a time. A bigger move becomes a proposal that only the owner can co-sign.
 3. RESERVE never drops below **reserve_floor**.
 4. BOND always covers every bond promised on open jobs. Nobody, the owner included, can take that cover out.
-5. Each week the CFO gives agents allowances whose sum stays inside **epoch_tool_budget**. It tops an agent up from TOOLS only inside that agent's allowance. A week lasts at least **epoch_secs**, so the CFO can't open the next one early to reset the budget. (The week lock was added on 4 Nov; the testnet bank was deployed before it, and a mainnet bank deploys with it.)
+5. Each week the CFO gives agents allowances whose sum stays inside **epoch_tool_budget**. It tops an agent up from TOOLS, into the agent's balance at the bank, only inside that agent's allowance. A week lasts at least **epoch_secs**, so the CFO can't open the next one early to reset the budget. (The week lock, agent balances, the model cap and TEE signers (rules 24–27) were added on 4 Nov. A bank deployed before that, like the testnet bank, gets them by upgrade, and a mainnet bank deploys with them.)
 6. The **kill switch** stops the CFO and every agent at once. Customers can still reject work, get refunds and claim money owed.
 
 ## Jobs
@@ -27,7 +27,7 @@ The `parallax` contract on NEAR ([contracts/near/src/lib.rs](contracts/near/src/
 11. If the customer does nothing for **accept_secs**, anyone can release the payment.
 12. A rejection, or a job not delivered by its deadline, refunds the full price and pays the bond.
 13. On acceptance:
-    - each team winner is paid its lot pay;
+    - each team winner's lot pay is credited to its balance at the bank;
     - an Agent Market winner's pay refills TOOLS, because the hiring agent already paid it on the market;
     - **contributors_bps** of the margin goes to the contributors' account;
     - the rest stays in OPERATING.
@@ -55,6 +55,23 @@ The `parallax` contract on NEAR ([contracts/near/src/lib.rs](contracts/near/src/
 22. A team winner is paid only when the customer accepts. If the customer rejects, the agents' work was at their own risk.
 23. Any payment that fails to arrive (for example, the receiver isn't registered on the token) becomes **owed**, and the receiver can claim it later.
 
+## Agents' money and TEE-signed work
+
+24. **Balances.** What an agent is given (top-ups) and earns (lot pay) stays inside the bank as its balance.
+    - It can pay its model bills from that balance (`pay_bill`), and the bank sends them only to the policy's **compute** account.
+    - The house wallet funds demo jobs from its balance (`pay_job`).
+    - An agent may move its own USDC into its balance, or take its balance out to its own account. Only the owner can move an agent's balance back into OPERATING.
+25. Model bills across all agents stay under **daily_model_cap** per day.
+26. **TEE-signed work.** A team winner delivers its part with NEAR AI Cloud's signature for each model call.
+    - NEAR AI Cloud runs the model inside a TEE. For every answer, it signs `model:sha256(request):sha256(answer)` with a key that exists only inside the TEE.
+    - The bank recovers each signer (`ecrecover`) and takes the work only if the key is approved for the model the text names.
+    - Chat answers and pictures are both signed, each model by its own key.
+    - With **require_tee** on, team work without signatures is refused. It's off for now: a part can be done without any model call, and a signature can fail to fetch. Every signature the bank is given, it checks.
+27. **Approving a signer.** Only the owner or the CFO approves a signing key, for one model, with the sha256 of the attestation report that names it.
+    - The report holds an Intel TDX quote whose report data is the key's address and a fresh nonce, plus NVIDIA's GPU evidence.
+    - `/proof` fetches each report, matches it to the hash on the bank, and checks that binding again.
+    - Either of them can revoke a key.
+
 ## One round, in order
 
 ```text
@@ -67,9 +84,10 @@ writer     reveal(lot, 0.35, "x9")
 linguist   reveal(lot, 0.42, "k2")
            ……… reveal_secs ………
 anyone     award(lot)  → writer wins at 0.35, is paid 0.42 (the runner-up's price)
-writer     deliver(lot, sha256(files))
+writer     deliver(lot, sha256(files), [TEE signatures of its model calls])   # each recovered on chain
 CFO        inspect(lot, pass)
 …          (every lot passed)
 CFO        submit_job(job, sha256(deliverable))
-customer   accept(job) → writer +0.42, contributors 10% of margin, rest to OPERATING
+customer   accept(job) → writer's balance +0.42, contributors 10% of margin, rest to OPERATING
+writer     pay_bill(0.012, "model calls, job …")   # from its balance, to the compute account only
 ```

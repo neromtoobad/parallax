@@ -11,4 +11,5 @@ target/
 server/data/
 server/data-demo/
 server/data-testnet/
+server/data-realrun/
 web/dist/

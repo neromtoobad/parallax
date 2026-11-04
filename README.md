@@ -19,7 +19,7 @@ You pay in USDC on NEAR. The money waits in escrow, the agents seal bids for eac
 
 <p align="center">
   <img alt="NEAR testnet" src="https://img.shields.io/badge/NEAR-testnet%20live-00EC97?style=flat-square&labelColor=000">
-  <img alt="Contract tests" src="https://img.shields.io/badge/contract%20tests-37%20passing-00EC97?style=flat-square&labelColor=000">
+  <img alt="Contract tests" src="https://img.shields.io/badge/contract%20tests-55%20passing-00EC97?style=flat-square&labelColor=000">
   <img alt="Swarm simulation" src="https://img.shields.io/badge/swarm%20sim-200%20jobs-00EC97?style=flat-square&labelColor=000">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-555?style=flat-square">
 </p>
@@ -36,8 +36,8 @@ node web/scripts/verify.ts
 
 | Command | What it does | What you should see |
 |---|---|---|
-| `verify.ts` | Rebuilds every auction on the testnet bank from NEAR itself: sealed bids against their commits, awards, pay, payouts, agent records | `94 of 94 checks pass, from 181 bank transactions` (Nov 3, 2026; more as jobs run) |
-| `cargo test` | The bank's rules, one test or more each, named `rule_01_…` to `rule_23_…` after [RULES.md](RULES.md) | `37 passed` |
+| `verify.ts` | Rebuilds every auction on the testnet bank from NEAR itself: sealed bids against their commits, awards, pay, payouts, agent records | `N of N checks pass, from M bank transactions`, with N and M growing as jobs run (195 of 195 from 635 on Nov 4, 2026) |
+| `cargo test` | The bank's rules, one test or more each, named `rule_01_…` to `rule_27_…` after [RULES.md](RULES.md) | `55 passed` |
 | `swarm-sim.ts` | 200 jobs through the auction code with scripted agents, and 14,010 tries at gaming it by shading a bid | `every award held` and `0 paid off` |
 
 The same chain checks run in your browser at [useparallax.xyz/proof](https://useparallax.xyz/proof).
@@ -54,7 +54,7 @@ Parallax sells three jobs to small businesses anywhere:
 
 Behind the counter is a team of 14 agents, each with its own NEAR account. An AI CFO prices the order and splits it into parts (Research, Writing, Visuals, Checking). For each part the agents send a sealed bid, then reveal it, and the bank contract awards the part to the best price per unit of quality. Research agents from the NEAR Agent Market quote on the Research part too, against the team.
 
-The winners do the work and pay their own NEAR AI Cloud bills from their own accounts. An auditor checks the result. When you accept, the bank pays each winner and splits the margin.
+The winners do the work on NEAR AI Cloud, whose models run inside a TEE and sign every answer. Each winner hands its part to the bank with those signatures, and the bank checks each one against the signing keys it has approved before taking the work. An auditor checks the result. When you accept, the bank credits each winner and splits the margin. Agents keep their money as balances inside the bank and pay their model bills from there, so no agent's key on the server can move tokens.
 
 **Why an auction.** A company of agents that hands out work by decree has no price signal: it can't tell when one of its agents costs too much, when an outside agent would do better for less, or who has earned what. In Parallax every part of every job has a price that the agents set themselves, and a contract enforces the rules. The award is a Vickrey auction, so bidding your true cost is each agent's best move, and every payment on chain has a reason.
 
@@ -62,9 +62,9 @@ The winners do the work and pay their own NEAR AI Cloud bills from their own acc
 
 | Track | What Parallax does | Where to look |
 |---|---|---|
-| **Business** | A company that runs its own money. Escrow for every job, a treasury in five buckets, an AI CFO whose key can only call the bank and who moves money only inside limits the contract enforces, the owner's co-sign for big moves, and a kill switch | [`contracts/near`](contracts/near), [RULES.md](RULES.md), [`server/src/cfo`](server/src/cfo) |
+| **Business** | A company that runs its own money. Escrow for every job, a treasury in five buckets, an AI CFO whose key can only call the bank and who moves money only inside limits the contract enforces, a daily cap on model spend, the owner's co-sign for big moves, and a kill switch. Every key on the server is a function-call key on the bank | [`contracts/near`](contracts/near), [RULES.md](RULES.md), [`server/src/cfo`](server/src/cfo) |
 | **Swarms** | 14 agents bid for each part of a job with commit and reveal. Awards weigh price against reputation, a part that fails inspection is rebid without the failed seller, and a 200-job simulation checks that no agent gains by lying about its price | [`server/src/auction.ts`](server/src/auction.ts), [`server/src/lots.ts`](server/src/lots.ts), [`server/scripts/swarm-sim.ts`](server/scripts/swarm-sim.ts) |
-| **Agents** | Agents that earn on chain, pay their own model bills, and compete with NEAR Agent Market agents the CFO looks up and quotes | [`server/src/market.ts`](server/src/market.ts), [`server/src/meter.ts`](server/src/meter.ts), [`server/src/settle.ts`](server/src/settle.ts) |
+| **Agents** | Agents that earn on chain, pay their own model bills, prove their work ran in NEAR AI Cloud's TEE, and compete with NEAR Agent Market agents the CFO looks up and quotes | [`server/src/market.ts`](server/src/market.ts), [`server/src/meter.ts`](server/src/meter.ts), [`server/src/settle.ts`](server/src/settle.ts) |
 
 ## How it works
 
@@ -84,11 +84,12 @@ sequenceDiagram
     T->>B: commit: sha256(lot, account, price, salt)
     T->>B: reveal
     F->>B: award: lowest price per unit of quality, paid the runner-up's price
-    T->>T: do the work, each paying its own NEAR AI Cloud bill
-    T->>B: deliver: hash of its part
+    T->>T: do the work on NEAR AI Cloud (in a TEE, every answer signed)
+    T->>B: deliver: hash of its part + TEE signatures, each recovered and checked on chain
     F->>B: inspect each part, then submit the job
     C->>B: accept (or ask for one revision, or reject for a full refund)
-    B-->>T: pay each winner, send contributors their share of the margin
+    B-->>T: credit each winner's balance, send contributors their share of the margin
+    T->>B: pay_bill: model calls, from its balance to the compute account, inside the daily cap
 ```
 
 Watch an order on its job page: sealed bids lock in, prices are revealed, winners are picked, and each agent's work streams into the feed with what it cost.
@@ -151,20 +152,26 @@ To deploy your own copy, create a root account from the faucet and run [`contrac
 
 ```bash
 near account create-account sponsor-by-faucet-service my-parallax.testnet autogenerate-new-keypair save-to-legacy-keychain network-config testnet create
-cd contracts/near && ROOT=my-parallax.testnet FUND_BANK=4.0 FUND_USDC=1.7 FUND_AGENT=0.1 ./deploy.sh
+cd contracts/near && ROOT=my-parallax.testnet FUND_BANK=4.3 FUND_USDC=1.7 FUND_AGENT=0.1 ./deploy.sh
 ```
 
-It creates the bank, the test USDC, the CFO (left with a function-call key on the bank only), the contributors and compute accounts and 14 agents, hires the agents, and writes `deployments/near-testnet.json`. Re-running skips what already exists.
+It creates the bank, the test USDC, the CFO, the contributors and compute accounts, the house wallet and 14 agents, and hires the agents. It leaves the CFO, every agent and the house wallet with one function-call key on the bank, moves the agents' and the house's full access to your root key, and writes `deployments/near-testnet.json`. Re-running picks up where a run stopped.
 
 ## Proof on NEAR testnet
 
-Don't take our word for it. [useparallax.xyz/proof](https://useparallax.xyz/proof) reads the bank contract and every transaction it took part in straight from NEAR testnet, in your browser, without asking our server. It checks that every revealed bid hashes to the commit sent before bidding closed, then rebuilds each award from those bids and the bidders' records, replaying the records themselves from the bank's history. Last, it matches every acceptance's cost, margin and contributors' share against the USDC that actually moved. The same checks run in a terminal, with no install and no keys (Node 22.18 or newer):
+Don't take our word for it. [useparallax.xyz/proof](https://useparallax.xyz/proof) reads the bank contract and every transaction it took part in straight from NEAR testnet, in your browser, without asking our server. It checks that every revealed bid hashes to the commit sent before bidding closed, then rebuilds each award from those bids and the bidders' records, replaying the records themselves from the bank's history. It matches every acceptance's cost, margin and contributors' share against the USDC that actually moved and the balances the bank credited. Last, it recovers the signer of every TEE signature on delivered work, and checks each approved signer's attestation report: the report's hash against the one on the bank, its key against the address, and the Intel TDX quote's report data against that key. The report files are the one thing it reads from our server, and their hashes on chain are what make that safe. The same checks run in a terminal, with no install and no keys (Node 22.18 or newer):
 
 ```bash
 node web/scripts/verify.ts
 ```
 
-As of Nov 3, 2026 the last line reads `94 of 94 checks pass, from 181 bank transactions`. Add `--tamper` to change one revealed bid by $0.000001 first: the check on that bid fails, and the script exits with 1.
+The last line reads `N of N checks pass, from M bank transactions` (195 of 195 from 635 on Nov 4, 2026). Add `--tamper` to change one revealed bid by $0.000001 first: the check on that bid fails, and the script exits with 1.
+
+The bank with balances, the model cap and TEE signers (rules 24–27) was rehearsed as a fresh deploy on `bank.parallax-v2.testnet` on Nov 4, 2026: a $2 Flyers job with real NEAR AI Cloud calls, four of them TEE-signed (three DeepSeek answers and one FLUX picture), every part delivered with its signatures and accepted. Check it with:
+
+```bash
+PARALLAX_BANK=bank.parallax-v2.testnet node web/scripts/verify.ts   # 35 of 35 on Nov 4
+```
 
 One $3 Find Customers round, run with `npm run lots:e2e` on Nov 3, 2026:
 

@@ -34,6 +34,9 @@ fn policy() -> Policy {
         commit_secs: 20,
         reveal_secs: 20,
         epoch_secs: 7 * 86_400,
+        compute: acc("compute.testnet"),
+        daily_model_cap: U128(3 * D),
+        require_tee: false,
     }
 }
 
@@ -166,6 +169,9 @@ fn rule_05_top_up_pays_the_agent_from_tools() {
     s.top_up(acc("writer.testnet"), U128(D), "inference".into());
     assert_eq!(b(&s, Bucket::Tools), 4 * D);
     assert_eq!(s.get_agent(acc("writer.testnet")).unwrap().topped_up.0, D);
+    // into the agent's balance at the bank, not out to its account
+    assert_eq!(s.balance_of(acc("writer.testnet")).0, D);
+    assert_eq!(s.overview().held.0, D);
 }
 
 #[test]
@@ -352,7 +358,7 @@ fn rule_21_a_failed_lot_goes_back_up_without_the_seller() {
     at("anyone.testnet", 41);
     s.award(lot);
     at("writer.testnet", 50);
-    s.deliver(lot, "draft".into());
+    s.deliver(lot, "draft".into(), None);
     at("cfo.testnet", 60);
     s.inspect(lot, false, "missed the brief".into());
     let l = s.get_lot(lot).unwrap();
@@ -373,7 +379,7 @@ fn rule_13_acceptance_pays_winners_contributors_and_the_company() {
     at("anyone.testnet", 41);
     s.award(lot);
     at("writer.testnet", 50);
-    s.deliver(lot, "draft".into());
+    s.deliver(lot, "draft".into(), None);
     at("cfo.testnet", 60);
     s.inspect(lot, true, "good".into());
     s.submit_job("j1".into(), "files".into());
@@ -382,6 +388,7 @@ fn rule_13_acceptance_pays_winners_contributors_and_the_company() {
     s.accept("j1".into());
     // Sole bidder is paid the reserve (1); margin 1; contributors 10% of it.
     assert_eq!(s.get_agent(acc("writer.testnet")).unwrap().earned.0, D);
+    assert_eq!(s.balance_of(acc("writer.testnet")).0, D);
     assert_eq!(b(&s, Bucket::Operating) - before, D - D / 10);
     assert!(get_logs().iter().any(|l| l.contains("\"contributors\":\"100000\"")));
 }
@@ -516,7 +523,7 @@ fn rule_21_a_pass_raises_the_winners_record() {
     at("anyone.testnet", 41);
     s.award(lot);
     at("writer.testnet", 50);
-    s.deliver(lot, "draft".into());
+    s.deliver(lot, "draft".into(), None);
     at("cfo.testnet", 60);
     s.inspect(lot, true, "good".into());
     let a = s.get_agent(acc("writer.testnet")).unwrap();
@@ -536,7 +543,7 @@ fn rule_22_a_rejected_job_pays_no_agent() {
     at("anyone.testnet", 41);
     s.award(lot);
     at("writer.testnet", 50);
-    s.deliver(lot, "draft".into());
+    s.deliver(lot, "draft".into(), None);
     at("cfo.testnet", 60);
     s.inspect(lot, true, "good".into());
     s.submit_job("j1".into(), "files".into());
@@ -544,4 +551,231 @@ fn rule_22_a_rejected_job_pays_no_agent() {
     s.reject("j1".into());
     assert_eq!(s.get_agent(acc("writer.testnet")).unwrap().earned.0, 0);
     assert!(get_logs().iter().any(|l| l.contains("\"refund\":\"2000000\"")));
+}
+
+// ------------------------------------------------------------------ agents' money and TEE work
+
+/// A real NEAR AI Cloud answer (DeepSeek V4.1 Flash in a TEE, 4 Nov) and its signature.
+const TEE_MODEL: &str = "deepseek-ai/DeepSeek-V4.1-Flash-1017";
+const TEE_TEXT: &str = "deepseek-ai/DeepSeek-V4.1-Flash-1017:2da842bd99788cd64fde31a79535822d9371d8fa2711bdcb97ee2321d6eb08b0:f36de2bdea05acc6a14a4cb4dfb2501c450b3c379aeceaea55818574715e4e81";
+const TEE_SIG: &str = "0xa8189dff1c57d9caba7db706f873bf5d9826d6e31942cbc9b7156ac3ec759e075c157eebb1895de586e07d38231485853f0961b39f546329a855171e577a8ab31b";
+const TEE_ADDR: &str = "0xfe0071895500a9755c18044948ab4f4e1a7f337e";
+const REPORT: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+
+fn topped(s: &mut Parallax, who: &str, amount: u128) {
+    at("cfo.testnet", 0);
+    s.set_allowance(acc(who), U128(amount));
+    s.top_up(acc(who), U128(amount), "model bills".into());
+}
+
+/// A lot on job j1 that writer.testnet has won, ready to deliver.
+fn won(s: &mut Parallax) -> u64 {
+    funded(s, "j1");
+    at("cfo.testnet", 0);
+    let lot = s.open_lot("j1".into(), "copy".into(), vec![], U128(D));
+    bid(s, lot, "writer.testnet", 300_000, 1);
+    reveal(s, lot, "writer.testnet", 300_000, 21);
+    at("anyone.testnet", 41);
+    s.award(lot);
+    lot
+}
+
+fn sig() -> Option<Vec<TeeSig>> {
+    Some(vec![TeeSig { text: TEE_TEXT.into(), signature: TEE_SIG.into() }])
+}
+
+#[test]
+fn rule_24_an_agent_pays_its_model_bill_from_its_balance_to_compute_only() {
+    let mut s = setup();
+    topped(&mut s, "writer.testnet", 2 * D);
+    at("writer.testnet", 10);
+    s.pay_bill(U128(D / 2), "job j1".into());
+    assert_eq!(s.balance_of(acc("writer.testnet")).0, 2 * D - D / 2);
+    assert_eq!(s.overview().held.0, 2 * D - D / 2);
+    assert!(get_logs().iter().any(|l| l.contains("\"bill\"") && l.contains("\"to\":\"compute.testnet\"")));
+}
+
+#[test]
+#[should_panic(expected = "balance too low")]
+fn rule_24_an_agent_cannot_spend_more_than_its_balance() {
+    let mut s = setup();
+    topped(&mut s, "writer.testnet", D);
+    at("writer.testnet", 10);
+    s.pay_bill(U128(D + 1), "too much".into());
+}
+
+#[test]
+#[should_panic(expected = "not an agent")]
+fn rule_24_only_hired_accounts_pay_bills() {
+    let mut s = setup();
+    at("stranger.testnet", 10);
+    s.pay_bill(U128(1), "x".into());
+}
+
+#[test]
+fn rule_24_the_house_wallet_funds_a_job_from_its_balance() {
+    let mut s = setup();
+    at("boss.testnet", 0);
+    s.hire(acc("house.testnet"), "house".into());
+    topped(&mut s, "house.testnet", 2 * D);
+    at("cfo.testnet", 0);
+    s.open_job("j1".into(), acc("house.testnet"), U128(2 * D), U128(0), "spec".into(), 3_600, 7_200);
+    at("house.testnet", 5);
+    s.pay_job("j1".into());
+    assert_eq!(s.get_job("j1".into()).unwrap().state, JobState::Funded);
+    assert_eq!(s.balance_of(acc("house.testnet")).0, 0);
+    assert_eq!(s.overview().escrowed.0, 2 * D);
+}
+
+#[test]
+fn rule_24_an_agent_can_put_its_own_usdc_in_its_balance() {
+    let mut s = setup();
+    assert_eq!(deposit(&mut s, "writer.testnet", D, "balance"), 0);
+    assert_eq!(s.balance_of(acc("writer.testnet")).0, D);
+    // anyone else's "balance" deposit is just a deposit to OPERATING
+    let before = b(&s, Bucket::Operating);
+    deposit(&mut s, "ada.testnet", D, "balance");
+    assert_eq!(s.balance_of(acc("ada.testnet")).0, 0);
+    assert_eq!(b(&s, Bucket::Operating), before + D);
+}
+
+#[test]
+#[should_panic(expected = "the kill switch is on")]
+fn rule_06_kill_switch_stops_model_bills() {
+    let mut s = setup();
+    topped(&mut s, "writer.testnet", D);
+    at("boss.testnet", 1);
+    s.set_killed(true);
+    at("writer.testnet", 10);
+    s.pay_bill(U128(1), "x".into());
+}
+
+#[test]
+#[should_panic(expected = "daily model cap reached")]
+fn rule_25_model_bills_stay_under_the_daily_cap() {
+    let mut s = setup();
+    topped(&mut s, "writer.testnet", 2 * D);
+    topped(&mut s, "scout.testnet", 2 * D);
+    at("writer.testnet", 10);
+    s.pay_bill(U128(2 * D), "a".into());
+    at("scout.testnet", 11);
+    s.pay_bill(U128(D + 1), "b".into()); // 3 USDC a day across all agents
+}
+
+#[test]
+fn rule_25_the_model_cap_resets_each_day() {
+    let mut s = setup();
+    topped(&mut s, "writer.testnet", 4 * D);
+    at("writer.testnet", 10);
+    s.pay_bill(U128(3 * D), "today".into());
+    at("writer.testnet", 86_400 + 10);
+    s.pay_bill(U128(D), "tomorrow".into());
+    assert_eq!(s.overview().day_model_spend.0, D);
+}
+
+#[test]
+fn rule_26_the_bank_recovers_the_tee_signer() {
+    at("anyone.testnet", 0);
+    assert_eq!(tee_signer(TEE_TEXT, TEE_SIG).as_deref(), Some(TEE_ADDR));
+    // one changed character in the answer's hash: a different (unapproved) signer
+    let forged = TEE_TEXT.replace(":f36de2", ":f36de3");
+    assert_ne!(tee_signer(&forged, TEE_SIG).as_deref(), Some(TEE_ADDR));
+}
+
+#[test]
+fn rule_26_team_work_signed_by_an_approved_tee_key_is_taken() {
+    let mut s = setup();
+    at("cfo.testnet", 0);
+    s.approve_signer(TEE_ADDR.to_uppercase().replace("0X", "0x"), TEE_MODEL.into(), REPORT.into());
+    let lot = won(&mut s);
+    at("writer.testnet", 50);
+    s.deliver(lot, "draft".into(), sig());
+    assert_eq!(s.get_lot(lot).unwrap().status, LotStatus::Submitted);
+    assert!(get_logs().iter().any(|l| l.contains(TEE_ADDR)));
+}
+
+#[test]
+#[should_panic(expected = "signed by a key the bank hasn't approved")]
+fn rule_26_work_signed_by_an_unknown_key_is_refused() {
+    let mut s = setup();
+    let lot = won(&mut s);
+    at("writer.testnet", 50);
+    s.deliver(lot, "draft".into(), sig());
+}
+
+#[test]
+#[should_panic(expected = "signed by a key the bank hasn't approved")]
+fn rule_26_a_tampered_answer_is_refused() {
+    let mut s = setup();
+    at("cfo.testnet", 0);
+    s.approve_signer(TEE_ADDR.into(), TEE_MODEL.into(), REPORT.into());
+    let lot = won(&mut s);
+    at("writer.testnet", 50);
+    let forged = TEE_TEXT.replace(":f36de2", ":f36de3");
+    s.deliver(lot, "draft".into(), Some(vec![TeeSig { text: forged, signature: TEE_SIG.into() }]));
+}
+
+#[test]
+#[should_panic(expected = "for this signer's model")]
+fn rule_26_a_signer_counts_only_for_its_own_model() {
+    let mut s = setup();
+    at("cfo.testnet", 0);
+    s.approve_signer(TEE_ADDR.into(), "Qwen/Qwen3-30B".into(), REPORT.into());
+    let lot = won(&mut s);
+    at("writer.testnet", 50);
+    s.deliver(lot, "draft".into(), sig());
+}
+
+#[test]
+#[should_panic(expected = "signed by a key the bank hasn't approved")]
+fn rule_26_a_revoked_signer_no_longer_counts() {
+    let mut s = setup();
+    at("cfo.testnet", 0);
+    s.approve_signer(TEE_ADDR.into(), TEE_MODEL.into(), REPORT.into());
+    at("boss.testnet", 1);
+    s.revoke_signer(TEE_ADDR.into());
+    let lot = won(&mut s);
+    at("writer.testnet", 50);
+    s.deliver(lot, "draft".into(), sig());
+}
+
+#[test]
+#[should_panic(expected = "team work must carry TEE signatures")]
+fn rule_26_with_require_tee_unsigned_work_is_refused() {
+    let mut s = setup();
+    at("boss.testnet", 0);
+    let mut p = policy();
+    p.require_tee = true;
+    s.set_policy(p);
+    let lot = won(&mut s);
+    at("writer.testnet", 50);
+    s.deliver(lot, "draft".into(), None);
+}
+
+#[test]
+#[should_panic(expected = "only the owner or the CFO")]
+fn rule_27_agents_cannot_approve_signers() {
+    let mut s = setup();
+    at("writer.testnet", 0);
+    s.approve_signer(TEE_ADDR.into(), TEE_MODEL.into(), REPORT.into());
+}
+
+#[test]
+fn rule_24_the_owner_can_take_an_agent_balance_back_into_operating() {
+    let mut s = setup();
+    topped(&mut s, "writer.testnet", D);
+    let before = b(&s, Bucket::Operating);
+    at("boss.testnet", 5);
+    s.reclaim(acc("writer.testnet"));
+    assert_eq!(s.balance_of(acc("writer.testnet")).0, 0);
+    assert_eq!(s.overview().held.0, 0);
+    assert_eq!(b(&s, Bucket::Operating), before + D);
+}
+
+#[test]
+#[should_panic(expected = "only the owner")]
+fn rule_24_the_cfo_cannot_reclaim_balances() {
+    let mut s = setup();
+    topped(&mut s, "writer.testnet", D);
+    s.reclaim(acc("writer.testnet"));
 }

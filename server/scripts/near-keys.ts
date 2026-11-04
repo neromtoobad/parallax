@@ -1,6 +1,7 @@
-// Builds PARALLAX_NEAR_KEYS for hosting: the CFO's function-call key and each agent's key, read from the
-// near-cli keychain (~/.near-credentials/<net>), plus the house wallet's. Only these accounts sign on the server; the owner's and the
-// bank's keys are never included. Writes a private file (mode 600) outside the repo and prints account
+// Builds PARALLAX_NEAR_KEYS for hosting: the function-call keys on the bank of the CFO, each agent and the
+// house wallet, read from the near-cli keychain (~/.near-credentials/<net>, <account>.bank-key.json, made by
+// deploy.sh). Only these accounts sign on the server, and only with these keys: a full-access key is never
+// included, and neither are the owner's or the bank's. Writes a private file (mode 600) outside the repo and prints account
 // names only, never a key. Paste the file's contents into the host's secret settings.
 //
 //   PARALLAX_NEAR_NET=mainnet node scripts/near-keys.ts [out file]   default ~/.parallax-<net>-keys.json
@@ -16,17 +17,16 @@ if (out.startsWith(new URL('../../', import.meta.url).pathname)) throw new Error
 
 const keys: Record<string, string> = {};
 const read = (file: string) => (JSON.parse(readFileSync(join(dir, file), 'utf8')) as { private_key: string }).private_key;
-// the CFO: only its function-call key on the bank
-if (existsSync(join(dir, `${NEAR.cfo}.bank-key.json`))) keys[NEAR.cfo] = read(`${NEAR.cfo}.bank-key.json`);
-else console.log(`  missing: ${NEAR.cfo}.bank-key.json (deploy.sh makes it)`);
+const add = (account: string) => {
+  if (existsSync(join(dir, `${account}.bank-key.json`))) keys[account] = read(`${account}.bank-key.json`);
+  else console.log(`  missing: ${account}.bank-key.json (deploy.sh makes it); left out`);
+};
+add(NEAR.cfo);
 // every agent under team.<root>, the second agents included
 const team = `.${NEAR.team[Object.keys(NEAR.team)[0]].split('.').slice(1).join('.')}`;
-for (const f of readdirSync(dir).filter((f) => f.endsWith(`${team}.json`))) keys[f.slice(0, -5)] = read(f);
+for (const f of readdirSync(dir).filter((f) => f.endsWith(`${team}.json`))) add(f.slice(0, -5));
 // the house wallet, which pays for and accepts demo jobs
-if (NEAR.house) {
-  if (existsSync(join(dir, `${NEAR.house}.json`))) keys[NEAR.house] = read(`${NEAR.house}.json`);
-  else console.log(`  missing: ${NEAR.house}.json`);
-}
+if (NEAR.house) add(NEAR.house);
 
 writeFileSync(out, JSON.stringify(keys), { mode: 0o600 });
 console.log(`wrote ${Object.keys(keys).length} keys to ${out} (mode 600):\n  ${Object.keys(keys).sort().join('\n  ')}`);

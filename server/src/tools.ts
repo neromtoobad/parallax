@@ -1,5 +1,6 @@
 // What an agent can use while it works. Model and picture calls go through meter.buy, so every one is
-// checked against the job's budget and allowlist and lands on the receipt, paid from the agent's account.
+// checked against the job's budget and allowlist and lands on the receipt, paid from the agent's balance
+// at the bank. Chat answers and pictures come with NEAR AI Cloud's TEE signature (tee.ts).
 // Map lookups (OpenStreetMap) and page reads are free and need no receipt.
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -44,6 +45,7 @@ export async function llm(job: Job, agent: Role, o: { system: string; prompt: st
     maxUsd: 0.02 + maxTokens * 2e-6, expectUsd: 0.002 + maxTokens * 6e-7,
     dryData: () => ({ choices: [{ message: { content: o.dry() } }] }),
     cost: (d) => chatCost(MODEL, d?.usage),
+    tee: MODEL,
   });
   return String(data?.choices?.[0]?.message?.content ?? '').trim();
 }
@@ -64,6 +66,7 @@ export async function picture(job: Job, agent: Role, o: { prompt: string; reason
     maxUsd: 0.05, expectUsd: 0.012,
     dryData: () => ({ data: [{ url: o.dry() }] }),
     cost: () => imageCost(IMAGE_MODEL, 1),
+    tee: IMAGE_MODEL,
   });
   const d = data?.data?.[0];
   if (d?.b64_json) return `data:image/png;base64,${d.b64_json}`;

@@ -16,7 +16,7 @@ const REPO = new URL('../../', import.meta.url).pathname;
 const ROLES = ['scout', 'researcher', 'writer', 'illustrator', 'reader', 'analyst', 'messenger', 'auditor', 'producer', 'investigator'];
 const AGENTS = [...ROLES, 'researcher-2', 'writer-2', 'illustrator-2', 'auditor-2'].map((r) => `${r}.team.${ROOT}`);
 const ACCOUNTS = ['bank', 'cfo', 'contributors', 'compute', 'team'].map((a) => `${a}.${ROOT}`).concat(AGENTS);
-const NEED_NEAR = 4.33 + 0.1; // deploy.sh's lean mainnet plan for 14 agents, plus a little for retries
+const NEED_NEAR = 5.08 + 0.1; // deploy.sh's lean mainnet plan for 14 agents, plus a little for retries
 
 let blocking = 0;
 const ok = (s: string) => console.log(`  ok    ${s}`);
@@ -69,7 +69,7 @@ console.log('\nBuild and tools');
 const wasm = join(REPO, 'contracts/near/target/near/parallax_near.wasm');
 if (existsSync(wasm)) {
   const kb = statSync(wasm).size / 1000;
-  ok(`bank contract built: ${kb.toFixed(0)} KB, about ${(kb / 100).toFixed(1)} NEAR of storage (bank.${ROOT} starts with 3.6)`);
+  ok(`bank contract built: ${kb.toFixed(0)} KB, about ${(kb / 100).toFixed(1)} NEAR of storage (bank.${ROOT} starts with 4.1)`);
 } else warn('contract not built yet; deploy.sh builds it (cargo near build)');
 (has('near', ['--version']) ? ok : bad)('near-cli-rs');
 (has('cargo', ['near', '--version']) ? ok : bad)('cargo-near');

@@ -10,7 +10,7 @@ import { publish } from './bus.ts';
 import { Job } from './job.ts';
 import { assignmentFor, auction, closeLots, type LotRecord } from './lots.ts';
 import { NEARAI_HOST } from './nearai.ts';
-import { NEAR, call, isAccountId, payBank, sha256, toUnits, txUrl, usdcOf, view } from './near/chain.ts';
+import { NEAR, balanceOf, call, isAccountId, sha256, toUnits, txUrl, view } from './near/chain.ts';
 import { priceFor, recordSpend } from './cfo/treasury.ts';
 import { findService, type Delivery } from './services/index.ts';
 import { briefOf } from './services/check.ts';
@@ -83,8 +83,8 @@ export async function fund(o: Order, withDemoWallet: boolean) {
   if (!DRY) {
     if (withDemoWallet) {
       if (o.customer !== DEMO_PAYER) throw new Error('this order is paid from its own wallet');
-      if ((await usdcOf(DEMO_PAYER)) < o.priceUsd) throw new Error('The house wallet is empty until the CFO refills it from the margin. Pay from your own NEAR wallet, or try again later.');
-      tx(o, `Paid ${o.priceUsd} USDC into escrow`, (await payBank(DEMO_PAYER, o.priceUsd, `job:${o.id}`)).hash);
+      if ((await balanceOf(DEMO_PAYER)) < o.priceUsd) throw new Error('The house wallet is empty until the CFO refills it from the margin. Pay from your own NEAR wallet, or try again later.');
+      tx(o, `Paid ${o.priceUsd} USDC into escrow`, (await call(DEMO_PAYER, NEAR!.bank, 'pay_job', { id: o.id }, { tgas: 30 })).hash);
     }
     if ((await jobState(o.id, 'Funded')) !== 'Funded') throw new Error('the bank has not received the payment yet');
   }

@@ -1,9 +1,12 @@
-// The proof page's checks. Nothing here talks to the Parallax server: the bank's state comes from a NEAR RPC node
-// and every transaction it took part in from FastNEAR's transaction index. Each auction is rebuilt from the
-// revealed bids and the bidders' records (themselves replayed from the bank's history), then compared with what
-// the contract recorded, and each job's payouts with the USDC transfers it made. Plain TypeScript, so it runs
-// in the browser and under node (web/scripts/verify.ts).
+// The proof page's checks. The bank's state comes from a NEAR RPC node and every transaction it took part in
+// from FastNEAR's transaction index. Each auction is rebuilt from the revealed bids and the bidders' records
+// (themselves replayed from the bank's history), then compared with what the contract recorded, and each job's
+// payouts with the USDC transfers and balances it made. Each TEE signature on delivered work is recovered here
+// again, and each approved signer's attestation report is matched to the hash the bank holds; the report file
+// is the one thing read from the Parallax server, and its hash on chain is what makes that safe. Plain
+// TypeScript, so it runs in the browser and under node (web/scripts/verify.ts).
 import { nameOf } from './team.ts';
+import { keccak256, hexToBytes, signerOf, toHex } from './ecrecover.ts';
 
 export const NET = {
   bank: 'bank.parallax.testnet',
@@ -11,6 +14,7 @@ export const NET = {
   rpc: 'https://rpc.testnet.fastnear.com',
   index: 'https://tx.test.fastnear.com',
   explorer: 'https://testnet.nearblocks.io',
+  reports: 'https://useparallax.xyz/api/attestation',
 };
 
 type Seller = { Team: string } | { Outside: string };
@@ -26,7 +30,11 @@ export type Call = {
   tx: string; block: number; signer: string; method: string; args: any; ok: boolean; events: Ev[];
   transfers: { from: string; to: string; amount: bigint }[];
 };
-export type Raw = { calls: Call[]; lots: ChainLot[]; jobs: ChainJob[]; agents: [string, { rep: number }][] };
+export type SignerRec = { model: string; report: string; by: string; active: boolean };
+export type Raw = {
+  calls: Call[]; lots: ChainLot[]; jobs: ChainJob[]; agents: [string, { rep: number }][];
+  signers: [string, SignerRec][]; reports: Record<string, string | null>; policy: { compute?: string; daily_model_cap?: string };
+};
 
 export type Check = { ok: boolean; what: string; detail: string; tx?: string };
 export type Bid = {
@@ -115,7 +123,30 @@ export async function load(say: (s: string) => void = () => {}): Promise<Raw> {
   }
   const jobs = await Promise.all([...new Set(lots.map((l) => l.job))].map((id) => view<ChainJob>('get_job', { id })));
   const agents = await view<Raw['agents']>('list_agents', {});
-  return { calls, lots, jobs, agents };
+  const policy = await view<Raw['policy']>('get_policy', {});
+  // Banks deployed before 4 Nov have no TEE signers.
+  const signers = await view<Raw['signers']>('list_signers', {}).catch(() => [] as Raw['signers']);
+  const reports: Raw['reports'] = {};
+  if (signers.length) say('Fetching the attestation reports behind the approved TEE signers');
+  for (const [a, sg] of signers) reports[a] = await fetch(`${NET.reports}/${sg.report}`).then((r) => (r.ok ? r.text() : null)).catch(() => null);
+  return { calls, lots, jobs, agents, signers, reports, policy };
+}
+
+/** The attestation report checks for one approved signer: the bank's hash, the key it names, and the TDX quote's binding. */
+async function reportChecks(address: string, sg: SignerRec, raw: string | null): Promise<Check[]> {
+  const who = `TEE signer ${address.slice(0, 10)}…`;
+  if (!raw) return [{ ok: false, what: who, detail: `no attestation report could be fetched from ${NET.reports}` }];
+  const h = await sha256(raw);
+  const out: Check[] = [{ ok: h === sg.report, what: `${who} report`, detail: `sha256 of the report is ${h.slice(0, 16)}…, ${h === sg.report ? 'the same as' : 'not'} the ${sg.report.slice(0, 16)}… the bank approved it with` }];
+  let m: any;
+  try { m = (JSON.parse(raw).model_attestations ?? []).find((x: any) => String(x.signing_address).toLowerCase() === address); } catch { /* not JSON */ }
+  const fromKey = m ? `0x${toHex(keccak256(hexToBytes(m.signing_public_key)).slice(12))}` : '';
+  out.push({ ok: !!m && m.model_name === sg.model && fromKey === address, what: `${who} key`, detail: m ? `the report's ${m.model_name} key hashes to ${fromKey}; the bank approved ${address} for ${sg.model}` : `the report names no key ${address}` });
+  // In a v4 TDX quote, report_data is bytes 568–632: here the signing address, zero padding, then the request's nonce.
+  const rd = m ? toHex(hexToBytes(m.intel_quote).slice(568, 632)) : '';
+  const bound = !!m && rd === address.slice(2) + '0'.repeat(24) + String(m.request_nonce);
+  out.push({ ok: bound, what: `${who} TDX quote`, detail: bound ? `the Intel TDX quote's report_data is this address and the nonce ${String(m.request_nonce).slice(0, 12)}…, so the key was made inside that enclave` : `the quote's report_data (${rd.slice(0, 24)}…) doesn't name this key` });
+  return out;
 }
 
 const sellerOf = (s: Seller | null | undefined) => (!s ? '' : 'Team' in s ? s.Team : `outside:${s.Outside}`);
@@ -159,6 +190,9 @@ function replay(calls: Call[]) {
 export async function verify(raw: Raw, tamper = false): Promise<Proof> {
   const calls = raw.calls.filter((c) => c.ok);
   const { rep: reps, at: repAt, bps: shares } = replay(calls);
+  // Signers as approved on chain at any time (a later revoke doesn't undo work it took while active).
+  const approved = new Map<string, SignerRec>();
+  for (const e of eventsOf(calls, 'signer')) approved.set(e.data.address, { model: e.data.model, report: e.data.report, by: e.data.by, active: true });
   let tampered = !tamper;
   // `fail` is the failed inspection after this round's award, if any: the contract put the lot back up for bids.
   type Laid = Round & { award: Ev & { call: Call }; fail?: Ev & { call: Call } };
@@ -230,6 +264,22 @@ export async function verify(raw: Raw, tamper = false): Promise<Proof> {
       const ev = award.data;
       checks.push({ ok: sellerOf(ev.winner) === (w?.seller ?? ''), what: 'Winner', detail: `rebuilt: ${w?.seller ?? 'nobody'}; the contract awarded ${sellerOf(ev.winner)}`, tx: award.call.tx });
       checks.push({ ok: BigInt(ev.pay) === r.pay, what: 'Pay', detail: `rebuilt: ${r.pay} (${r.payNote}); the contract set ${ev.pay}`, tx: award.call.tx });
+      // The work filed for this round: each TEE signature recovered again, against the signers the bank approved.
+      const end = r.fail?.block ?? Infinity;
+      for (const d of calls.filter((c) => c.method === 'deliver' && c.args.lot === lot.id && c.block > award.block && c.block <= end)) {
+        const sigs: { text: string; signature: string }[] = d.args.tee ?? [];
+        if (!sigs.length) continue;
+        const bad = sigs.map((t) => ({ t, who: signerOf(t.text, t.signature) })).filter(({ t, who }) => {
+          const sg = who ? approved.get(who) : undefined;
+          return !sg || !t.text.startsWith(`${sg.model}:`);
+        });
+        checks.push({
+          ok: !bad.length, what: 'TEE-signed work',
+          detail: bad.length ? `${bad.length} of ${sigs.length} signatures don't recover to an approved signer for their model`
+            : `${sigs.length} model ${sigs.length === 1 ? 'answer' : 'answers'} signed inside NEAR AI Cloud's TEE by ${[...new Set(sigs.map((t) => signerOf(t.text, t.signature)!.slice(0, 10)))].join(', ')}…, each over sha256 of the exact request and answer`,
+          tx: d.tx,
+        });
+      }
       if (r === (jp.rounds.filter((x) => x.lot.id === lot.id).pop())) {
         if (r.fail) checks.push({
           ok: lot.round === Number(r.fail.data.round) && !lot.winner && lot.status !== 'Passed',
@@ -261,10 +311,14 @@ export async function verify(raw: Raw, tamper = false): Promise<Proof> {
       jp.checks.push({ ok: BigInt(d.cost) === cost, what: 'Cost', detail: `the passed lots' pay adds up to ${passed.map((l) => l.pay).join(' + ')} = ${cost}; the contract booked ${d.cost}`, tx: acc.call.tx });
       jp.checks.push({ ok: BigInt(d.margin) === margin && BigInt(d.contributors) === contributors, what: 'Margin', detail: `${amount} − ${cost} = ${margin}, and ${bps / 100}% of it to contributors is ${contributors}; the contract booked ${d.margin} and ${d.contributors}`, tx: acc.call.tx });
       const sent = acc.call.transfers.filter((t) => t.from === NET.bank);
+      // Before 4 Nov a team winner was sent its pay; since then it's credited to its balance at the bank.
+      const credits = acc.call.events.filter((e) => e.event === 'credit' && e.data.what === 'lot');
       for (const l of passed.filter((l) => l.winner && 'Team' in l.winner)) {
         const to = sellerOf(l.winner), at = sent.findIndex((t) => t.to === to && t.amount === BigInt(l.pay));
-        jp.checks.push({ ok: at >= 0, what: `${l.title} paid`, detail: at >= 0 ? `${l.pay} USDC units went to ${to}` : `no transfer of ${l.pay} to ${to}`, tx: acc.call.tx });
+        const cr = at < 0 ? credits.findIndex((e) => e.data.agent === to && BigInt(e.data.amount) === BigInt(l.pay)) : -1;
+        jp.checks.push({ ok: at >= 0 || cr >= 0, what: `${l.title} paid`, detail: at >= 0 ? `${l.pay} USDC units went to ${to}` : cr >= 0 ? `${l.pay} USDC units were credited to ${to}'s balance at the bank` : `no transfer or credit of ${l.pay} to ${to}`, tx: acc.call.tx });
         if (at >= 0) sent.splice(at, 1);
+        if (cr >= 0) credits.splice(cr, 1);
       }
       if (contributors > 0n) {
         const at = sent.findIndex((t) => t.amount === contributors);
@@ -286,6 +340,24 @@ export async function verify(raw: Raw, tamper = false): Promise<Proof> {
     detail: off.length ? `replayed records differ for ${off.map(([a, ag]) => `${a} (${reps.get(a)} vs ${ag.rep})`).join(', ')}`
       : `all ${raw.agents.length} agents' records, replayed from ${calls.length} transactions, match the contract today: ${raw.agents.map(([a, ag]) => `${a.split('.')[0]} ${ag.rep}`).join(', ')}`,
   }];
+  // 5. Model bills: each went from an agent's balance only to the compute account, inside the daily cap.
+  const bills = calls.filter((c) => c.method === 'pay_bill' && c.events.some((e) => e.event === 'bill'));
+  if (bills.length) {
+    const wrong = bills.filter((c) => {
+      const e = c.events.find((x) => x.event === 'bill')!.data;
+      const t = c.transfers.filter((x) => x.from === NET.bank);
+      return e.to !== raw.policy.compute || BigInt(e.day_model_spend) > BigInt(raw.policy.daily_model_cap ?? 0)
+        || (t.length && !(t.length === 1 && t[0].to === e.to && t[0].amount === BigInt(e.amount)));
+    });
+    checks.push({
+      ok: !wrong.length, what: 'Model bills',
+      detail: wrong.length ? `${wrong.length} of ${bills.length} bills went elsewhere or past the daily cap`
+        : `all ${bills.length} model bills went from an agent's balance to ${raw.policy.compute}, and no day's total passed the ${units(raw.policy.daily_model_cap ?? 0)} cap`,
+      tx: wrong[0]?.tx,
+    });
+  }
+  // 6. Every approved TEE signer's attestation report.
+  for (const [a, sg] of raw.signers) checks.push(...(await reportChecks(a, sg, raw.reports[a])));
   const all = [...checks, ...jobs.flatMap((j) => [...j.rounds.flatMap((r) => r.checks), ...j.checks])];
   return { jobs, checks, total: all.length, passed: all.filter((c) => c.ok).length, txs: raw.calls.length };
 }

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Closes a Parallax deployment and sends what it holds back to the root account: every bucket's USDC, every
-# account's USDC, and the NEAR the accounts were created with, the bank's ~3.3 NEAR of code storage included.
+# agent's balance at the bank, every account's USDC, and the NEAR the accounts were created with, the bank's
+# ~3.8 NEAR of code storage included.
 # Run it after judging. It refuses while customers have money in escrow or the bank owes anyone.
 #
 #   NET=mainnet ROOT=useparallax.near PLAN_ONLY=1 ./teardown.sh   what it would do, sending nothing
@@ -9,6 +10,7 @@
 # NEAR won't delete an account that stores more than 10 KB, so the bank's code is first replaced with
 # contracts/near-cleanup (680 bytes), which clears the bank's storage; then the account is deleted.
 # The CFO is left as it is: deploy.sh took away its full-access key, so only its gas allowance stays there.
+# The agents and the house wallet are closed with the root's own key, which deploy.sh made their full-access key.
 set -euo pipefail
 cd "$(dirname "$0")"
 NET=${NET:-testnet}
@@ -35,11 +37,16 @@ view() { # view <contract> <method> <json>
 near_of() { q "{\"request_type\":\"view_account\",\"finality\":\"final\",\"account_id\":\"$1\"}" |
   python3 -c "import json,sys;r=json.load(sys.stdin).get('result');print(round(int(r['amount'])/1e24,4) if r else '-')"; }
 usdc_of() { view "$USDC" ft_balance_of "{\"account_id\":\"$1\"}" | python3 -c "import json,sys;v=json.load(sys.stdin);print(int(v or 0))"; }
-signer() { [ "$1" = "$ROOT" ] && echo "$ROOT_SIGN" || echo sign-with-legacy-keychain; }
+# The root signs as itself, and as any account whose full access deploy.sh handed to the root's key.
+signer() {
+  if [ "$1" = "$ROOT" ]; then echo "$ROOT_SIGN"
+  elif [ -f "$KEYS/$1.bank-key.json" ]; then [ "${SIGN:-}" = ledger ] && echo sign-with-ledger || echo "sign-with-access-key-file $KEYS/$ROOT.json"
+  else echo sign-with-legacy-keychain; fi
+}
 retry() { for i in 1 2 3 4; do "$@" && return 0; echo "  retry $i: ${*:1:5}" >&2; sleep 3; done; return 1; }
 call() { # call <contract> <method> <json> <signer> [deposit]
   retry near contract call-function as-transaction "$1" "$2" json-args "$3" prepaid-gas '100.0 Tgas' \
-    attached-deposit "${5:-0 NEAR}" sign-as "$4" $NETCFG "$(signer "$4")" send >/dev/null
+    attached-deposit "${5:-0 NEAR}" sign-as "$4" $NETCFG $(signer "$4") send >/dev/null
 }
 gone() { [ "$(near_of "$1")" = "-" ]; }
 close() { # close <account>: its USDC to the root, its USDC registration refunded, then the account deleted
@@ -49,7 +56,7 @@ close() { # close <account>: its USDC to the root, its USDC registration refunde
   u=$(usdc_of "$a")
   [ "$u" -gt 0 ] && call "$USDC" ft_transfer "{\"receiver_id\":\"$ROOT\",\"amount\":\"$u\"}" "$a" '1 yoctoNEAR'
   call "$USDC" storage_unregister '{"force":false}' "$a" '1 yoctoNEAR' 2>/dev/null || true
-  retry near account delete-account "$a" beneficiary "$ROOT" $NETCFG sign-with-legacy-keychain send >/dev/null
+  retry near account delete-account "$a" beneficiary "$ROOT" $NETCFG $(signer "$a") send >/dev/null
   echo "- $a closed ($(python3 -c "print($u/1e6)") USDC back)"
 }
 
@@ -62,7 +69,7 @@ import json;o=json.loads('''$OV''');print(o['escrowed'],o['bonds_outstanding'],o
 
 echo "Teardown plan for $ROOT on $NET:"
 echo "  bank $BANK: $(near_of "$BANK") NEAR; buckets (Operating, Tools, Bond, Reserve, Promo) $BUCKETS (USDC units)"
-echo "  escrowed $ESCROW, bonds outstanding $BONDS, owed $OWED"
+echo "  escrowed $ESCROW, bonds outstanding $BONDS, owed $OWED, held for agents $(python3 -c "import json;print(json.loads('''$OV''').get('held','0'))")"
 for a in "${OTHERS[@]}" "${AGENTS[@]}" "$TEAM"; do echo "  $a: $(near_of "$a") NEAR, $(python3 -c "print($(usdc_of "$a")/1e6)") USDC"; done
 echo "  $CFO: $(near_of "$CFO") NEAR, stays (function-call key only)"
 echo "Everything above goes to $ROOT; the bank is stopped first and its code is replaced, so this can't be undone."
@@ -74,6 +81,11 @@ read -r -p "Type $ROOT to close this deployment: " typed
 # 1. Stop the CFO and the agents, and take every bucket out to the root.
 if ! gone "$BANK"; then
   call "$BANK" set_killed '{"killed":true}' "$ROOT"
+  # Agents' balances at the bank go back into OPERATING first, so they leave with the buckets.
+  for a in $(view "$BANK" list_balances '{}' | python3 -c "import json,sys;print(' '.join(a for a,b in (json.loads(sys.stdin.read()) or []) if b!='0'))"); do
+    call "$BANK" reclaim "{\"agent\":\"$a\"}" "$ROOT" && echo "  $a: its balance back into OPERATING"
+  done
+  BUCKETS=$(view "$BANK" overview '{}' | python3 -c "import json,sys;print(','.join(json.load(sys.stdin)['buckets']))")
   i=0
   for b in Operating Tools Bond Reserve Promo; do
     amt=$(echo "$BUCKETS" | cut -d, -f$((i + 1))); i=$((i + 1))

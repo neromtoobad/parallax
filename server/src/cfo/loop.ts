@@ -1,7 +1,8 @@
-// The CFO's treasury round, run every few minutes on NEAR. It keeps each agent's own account stocked with
-// enough USDC for its model bills, and the house wallet with enough to pay for one demo job, all inside
-// the bank's rules: a week's allowances can't add up to more than the epoch tool budget, a single move
-// can't be more than max_move, and money only leaves the bank through top_up to a hired account.
+// The CFO's treasury round, run every few minutes on NEAR. It keeps each agent's balance at the bank
+// stocked with enough USDC for its model bills, and the house wallet's with enough to pay for one demo
+// job, all inside the bank's rules: a week's allowances can't add up to more than the epoch tool budget,
+// a single move can't be more than max_move, and a top-up only moves TOOLS into a hired account's balance.
+// The money itself never leaves the bank except as a model bill to the compute account (pay_bill).
 //
 // The money goes round: the house wallet pays a demo job into escrow, acceptance pays the winners and
 // leaves the margin in OPERATING, and the CFO moves what the week needs from OPERATING into TOOLS.
@@ -9,7 +10,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { DATA_DIR, DRY } from '../config.ts';
 import { publish } from '../bus.ts';
-import { NEAR, call, fromUnits, sha256, toUnits, usdcOf, view } from '../near/chain.ts';
+import { NEAR, balanceOf, call, fromUnits, sha256, toUnits, view } from '../near/chain.ts';
 import { ROSTER, accountOf } from '../wallets.ts';
 import { SERVICES } from '../services/index.ts';
 import { refundLate } from '../orders.ts';
@@ -74,12 +75,12 @@ export async function treasuryRound(): Promise<string[]> {
   const left = (a: string) => { const r = fresh.get(a); return r && Number(r.allowance_epoch) === epoch ? fromUnits(r.allowance) - fromUnits(r.topped_up) : 0; };
   const needs: { account: string; usd: number; why: string }[] = [];
   for (const a of team) {
-    const have = await usdcOf(a);
+    const have = await balanceOf(a);
     if (have < AGENT_FLOAT / 2) needs.push({ account: a, usd: Math.min(AGENT_FLOAT - have, left(a)), why: 'model bills' });
   }
   if (house && fresh.get(house)?.active) {
     const want = Math.max(...SERVICES.map((x) => x.priceUsd));
-    const have = await usdcOf(house);
+    const have = await balanceOf(house);
     if (have < want) needs.push({ account: house, usd: Math.min(want - have, left(house)), why: 'demo jobs' });
   }
   const total = needs.reduce((t, n) => t + Math.max(0, n.usd), 0);
