@@ -25,5 +25,6 @@
     "investigator": "investigator.team.parallax.testnet"
   },
   "compute": "compute.parallax.testnet",
-  "house": "house.parallax.testnet"
+  "house": "house.parallax.testnet",
+  "crew": "crew.parallax.testnet"
 }
