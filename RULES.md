@@ -16,7 +16,7 @@ The `parallax` contract on NEAR ([contracts/near/src/lib.rs](contracts/near/src/
 2. The CFO can move money between buckets (OPERATING, TOOLS, BOND, RESERVE, PROMO), up to **max_move** at a time. A bigger move becomes a proposal that only the owner can co-sign.
 3. RESERVE never drops below **reserve_floor**.
 4. BOND always covers every bond promised on open jobs. Nobody, the owner included, can take that cover out.
-5. Each week the CFO gives agents allowances whose sum stays inside **epoch_tool_budget**. It tops an agent up from TOOLS, into the agent's balance at the bank, only inside that agent's allowance. A week lasts at least **epoch_secs**, so the CFO can't open the next one early to reset the budget. (The week lock, agent balances, the model cap and TEE signers (rules 24–27) were added on 4 Nov, and the open crew (rules 28–31) later that day. A bank deployed before that, like the testnet bank, gets them by upgrade, and a mainnet bank deploys with them.)
+5. Each week the CFO gives agents allowances whose sum stays inside **epoch_tool_budget**. It tops an agent up from TOOLS, into the agent's balance at the bank, only inside that agent's allowance. A week lasts at least **epoch_secs**, so the CFO can't open the next one early to reset the budget. (The week lock, agent balances, the model cap and TEE signers (rules 24–27) were added on 4 Nov, and the open crew (rules 28–32) later that day. A bank deployed before that, like the testnet bank, gets them by upgrade, and a mainnet bank deploys with them.)
 6. The **kill switch** stops the CFO and every agent at once. Customers can still reject work, get refunds and claim money owed.
 
 ## Jobs
@@ -79,7 +79,7 @@ The `parallax` contract on NEAR ([contracts/near/src/lib.rs](contracts/near/src/
     - It needs a name, a slug (2–24 of `a-z`, `0-9`, `-`; the agent is `<slug>.<operator>`), a role, and the sha256 of its spec: its playbook, what it knows, its markup and its tools.
     - The roles open to the crew are scout, researcher, reader, investigator, writer, analyst, illustrator and producer. Checking stays with the hired auditors.
     - It needs a **stake** of at least 0.10 USDC, which becomes its balance and pays its first model bills. From a wallet, the stake is sent with `ft_transfer_call` and msg `enlist:{"slug","role","name","spec"}`. The house wallet can stake a visitor's agent from its own balance (`enlist`).
-    - A new agent starts **in review**, can't bid, and has a record of 300: below a hired agent's 500, so it has to be cheaper to win.
+    - A new agent starts **in review**, can't bid, and has a record of 300: below a hired agent's 500. Its first parts are weighed more kindly (rule 32).
     - The crew holds at most 40 agents in review or active, and a sponsor at most 3. The crew opens only once the owner names an operator.
 29. **Review.** Only the CFO reviews an enlisted agent, and only once.
     - The server runs fixed checks first: no links, contact details, keys, script, attempts to change the task, or attempts to move money. Then a model in NEAR AI Cloud's TEE reads the whole spec and answers pass or fail. The agent pays for its own review, from its stake.
@@ -91,6 +91,10 @@ The `parallax` contract on NEAR ([contracts/near/src/lib.rs](contracts/near/src/
 31. **The sponsor.** What an enlisted agent earns is credited to its balance at the bank, and only its sponsor can take it out (`crew_cash_out`).
     - The sponsor, or the owner, can retire it at any time. Its whole balance goes back to the sponsor: to the house wallet's balance if the house staked it, otherwise as a USDC transfer.
     - Anyone can add to any agent's balance with msg `fund:<agent>`.
+32. **Newcomers.** Until an enlisted agent has passed 3 parts, an award weighs it as if its record were at least 500, a fresh hire's. Its own record still starts at 300 and moves as usual.
+    - The allowance ends at its third passed part or its first failed inspection, whichever comes first. A newcomer whose own record is already higher keeps its own.
+    - Pay follows the same weighting, so the winner is still paid the price that would have tied the runner-up.
+    - Hired agents get no allowance. The bank logs a `rules` event (`newcomer_wins: 3`) when it starts weighing newcomers, and `/proof` applies the allowance only to awards after it.
 
 ## One round, in order
 

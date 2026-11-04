@@ -1000,3 +1000,74 @@ fn rule_31_the_owner_can_take_an_agent_off_the_crew() {
     // its stake still goes to its sponsor
     assert!(get_logs().iter().any(|l| l.contains("\"cash_out\"") && l.contains("\"to\":\"sam.testnet\"")));
 }
+
+/// Nia (record 300, on the crew) and the hired writer (500) bid on the same lot.
+fn nia_against_writer(s: &mut Parallax, nia: u128, writer: u128) -> u64 {
+    funded(s, "j1");
+    at("cfo.testnet", 0);
+    let lot = s.open_lot("j1".into(), "copy".into(), vec!["writer".into()], U128(D));
+    at("crew.testnet", 1);
+    s.crew_commit(acc(NIA), lot, commit_hash(lot, &acc(NIA), nia, "salt"));
+    bid(s, lot, "writer.testnet", writer, 2);
+    at("crew.testnet", 21);
+    s.crew_reveal(acc(NIA), lot, U128(nia), "salt".into());
+    reveal(s, lot, "writer.testnet", writer, 22);
+    at("anyone.testnet", 41);
+    s.award(lot);
+    lot
+}
+
+#[test]
+fn rule_32_a_newcomer_is_weighed_like_a_fresh_hire() {
+    let mut s = passed();
+    // At its own 300 it would lose (300000 / 6500 > 310000 / 7500); weighed at 500 it wins, paid the runner-up's price.
+    let lot = nia_against_writer(&mut s, 300_000, 310_000);
+    let l = s.get_lot(lot).unwrap();
+    assert_eq!(l.winner, Some(Seller::Team(acc(NIA))));
+    assert_eq!(l.pay.0, 310_000);
+    assert_eq!(s.get_agent(acc(NIA)).unwrap().rep, REP_ENLIST);
+}
+
+#[test]
+fn rule_32_the_allowance_ends_after_three_passed_parts() {
+    let mut s = passed();
+    let mut a = s.agents.get(&acc(NIA)).cloned().unwrap();
+    a.wins = NEWCOMER_WINS;
+    a.rep = 330;
+    s.agents.insert(acc(NIA), a);
+    let lot = nia_against_writer(&mut s, 300_000, 310_000);
+    assert_eq!(s.get_lot(lot).unwrap().winner, Some(Seller::Team(acc("writer.testnet"))));
+}
+
+#[test]
+fn rule_32_the_allowance_ends_at_the_first_failed_inspection() {
+    let mut s = passed();
+    let mut a = s.agents.get(&acc(NIA)).cloned().unwrap();
+    a.fails = 1;
+    a.rep = 250;
+    s.agents.insert(acc(NIA), a);
+    let lot = nia_against_writer(&mut s, 300_000, 310_000);
+    assert_eq!(s.get_lot(lot).unwrap().winner, Some(Seller::Team(acc("writer.testnet"))));
+}
+
+#[test]
+fn rule_32_a_newcomer_with_a_better_record_keeps_it() {
+    let mut s = passed();
+    let mut a = s.agents.get(&acc(NIA)).cloned().unwrap();
+    a.rep = 700;
+    s.agents.insert(acc(NIA), a);
+    // Weighed at its own 700 (q 8500): 340000 / 8500 beats 310000 / 7500.
+    let lot = nia_against_writer(&mut s, 340_000, 310_000);
+    assert_eq!(s.get_lot(lot).unwrap().winner, Some(Seller::Team(acc(NIA))));
+}
+
+#[test]
+fn rule_32_hired_agents_get_no_allowance() {
+    let mut s = passed();
+    let mut w = s.agents.get(&acc("writer.testnet")).cloned().unwrap();
+    w.rep = 300;
+    s.agents.insert(acc("writer.testnet"), w);
+    // Both weighed by their own records now: the writer at 300 loses to Nia at 500 even bidding a little less.
+    let lot = nia_against_writer(&mut s, 300_000, 290_000);
+    assert_eq!(s.get_lot(lot).unwrap().winner, Some(Seller::Team(acc(NIA))));
+}

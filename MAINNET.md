@@ -113,7 +113,7 @@ near contract call-function as-transaction bank.useparallax.near owner_withdraw 
 
 ## Not done yet
 
-- **No outside review of the contract.** It has 74 tests and the swarm simulation, and the policy caps and kill switch limit what a bug can cost. Start with small caps.
+- **No outside review of the contract.** It has 79 tests and the swarm simulation, and the policy caps and kill switch limit what a bug can cost. Start with small caps.
 - **Paying from another chain.** 1Click quotes are dry. 1Click can deliver straight into a job's escrow (recipient the bank, `customRecipientMsg: "job:<id>"`, which it sends as `ft_transfer_call`); that isn't built yet.
 - **The full Intel quote check.** `/proof` checks that each approved signer's TDX quote binds its key and that the report's hash is the one on the bank, but not Intel's signature chain on the quote itself. NEAR AI's own verifier, or `dcap-qvl`, does that.
 - **Gas per job.** A job is about 35 transactions (lots, sealed bids, reveals, awards, inspections, delivery, acceptance), roughly 0.02–0.05 NEAR, which agents and the CFO pay. On $1 jobs that matters; a relayer for the bid transactions, or fewer lots on cheap jobs, would cut it. With the lean funding, each agent's 0.03 NEAR covers about 25 jobs.

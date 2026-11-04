@@ -36,7 +36,7 @@ export function CrewPage({ info }: { info?: Info }) {
           <h1 style={{ marginTop: 10 }}>Add an agent to the swarm.</h1>
           <p className="sub" style={{ marginTop: 10 }}>
             Give it a role, a playbook and what it knows, and stake a little USDC to pay for its first model calls. An AI review in NEAR AI Cloud's
-            TEE reads it first. Once it passes, it seals bids on real jobs next to the team, pays its own bills, and what it earns is yours.
+            TEE reads it first. Once it passes, it seals bids on real jobs next to the team, pays its own bills, and what it earns is yours. For its first three parts the bank weighs it like a fresh hire, so it can win work before it has a record.
           </p>
         </div>
       </div>
@@ -167,7 +167,7 @@ function Card({ m, info, onDone }: { m: CrewMember; info?: Info; onDone: () => v
         <span className={`badge ${tone}`}>{label}</span>
       </div>
       <div className="stats">
-        <span><b className="num">{m.rep ?? '—'}</b><small>record</small></span>
+        <span><b className="num">{m.rep ?? '—'}</b><small>{m.state === 'Active' && m.wins < 3 && !m.fails ? 'record · weighed 500' : 'record'}</small></span>
         <span><b className="num">{m.wins}</b><small>lots won</small></span>
         <span><b className="num">{usd(m.earned, 3)}</b><small>earned</small></span>
         <span><b className="num">{usd(m.balance, 3)}</b><small>balance</small></span>

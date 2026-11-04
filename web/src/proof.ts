@@ -43,7 +43,7 @@ export type Raw = {
 
 export type Check = { ok: boolean; what: string; detail: string; tx?: string };
 export type Bid = {
-  seller: string; outside: boolean; price: bigint; rep?: number; q: bigint; salt?: string; hash?: string;
+  seller: string; outside: boolean; price: bigint; rep?: number; newcomer?: boolean; q: bigint; salt?: string; hash?: string;
   revealTx?: string; win?: boolean;
 };
 export type Round = { lot: ChainLot; n: number; bids: Bid[]; pay: bigint; payNote: string; checks: Check[]; awardTx?: string };
@@ -169,32 +169,41 @@ const setOf = (m: Map<number, Set<string>>, k: number) => m.get(k) ?? m.set(k, n
 /**
  * Every agent's record replayed from the bank's history the way the contract keeps it: 500 when hired, +10 for a
  * passed inspection (at most 1000), -50 for a failed one, -20 for a sealed bid never revealed. Also what each
- * award's bidders stood at when it was scored, and the contributors' share in force at each acceptance.
+ * award's bidders were weighed by when it was scored, and the contributors' share in force at each acceptance.
+ * From the bank's `rules` event on (rule 32), an enlisted agent with fewer passed parts than it says and no failed
+ * inspection is weighed as if its record were at least 500.
  */
 function replay(calls: Call[]) {
-  const rep = new Map<string, number>(), at: Record<string, number> = {}, bps: Record<string, number> = {};
+  const rep = new Map<string, number>(), at: Record<string, number> = {}, fresh: Record<string, boolean> = {}, bps: Record<string, number> = {};
   const sealed = new Map<number, Set<string>>(), shown = new Map<number, Set<string>>();
   const add = (a: string, d: number) => rep.has(a) && rep.set(a, Math.min(1000, Math.max(0, rep.get(a)! + d)));
-  let share = 0;
+  const crew = new Set<string>(), wins = new Map<string, number>(), fails = new Map<string, number>();
+  const bump = (m: Map<string, number>, a: string) => m.set(a, (m.get(a) ?? 0) + 1);
+  let share = 0, newcomerWins = 0;
+  const weighed = (a: string) => {
+    const r = rep.get(a) ?? 0;
+    return crew.has(a) && (wins.get(a) ?? 0) < newcomerWins && !fails.get(a) ? Math.max(r, 500) : r;
+  };
   for (const c of calls) {
     if (c.method === 'new' || c.method === 'set_policy') share = c.args.policy.contributors_bps;
     if (c.method === 'hire' && !rep.has(c.args.agent)) rep.set(c.args.agent, 500);
     for (const e of c.events) {
-      if (e.event === 'enlist') rep.set(e.data.agent, 300); // enlisted agents start below a hire
+      if (e.event === 'enlist') { rep.set(e.data.agent, 300); crew.add(e.data.agent); } // enlisted agents start below a hire
+      if (e.event === 'rules') newcomerWins = Number(e.data.newcomer_wins ?? 0);
       const lot = Number(e.data.lot);
       if (e.event === 'commit') setOf(sealed, lot).add(e.data.agent);
       if (e.event === 'reveal') setOf(shown, lot).add(e.data.agent);
       if (e.event === 'award' || e.event === 'void') {
         for (const a of setOf(sealed, lot)) if (!setOf(shown, lot).has(a)) add(a, -20);
-        for (const a of setOf(shown, lot)) at[`${e.block}:${a}`] = rep.get(a) ?? 0;
+        for (const a of setOf(shown, lot)) { at[`${e.block}:${a}`] = weighed(a); fresh[`${e.block}:${a}`] = weighed(a) !== (rep.get(a) ?? 0); }
         sealed.delete(lot); shown.delete(lot);
       }
-      if (e.event === 'pass' && 'Team' in e.data.winner) add(e.data.winner.Team, 10);
-      if (e.event === 'fail' && 'Team' in e.data.seller) add(e.data.seller.Team, -50);
+      if (e.event === 'pass' && 'Team' in e.data.winner) { add(e.data.winner.Team, 10); bump(wins, e.data.winner.Team); }
+      if (e.event === 'fail' && 'Team' in e.data.seller) { add(e.data.seller.Team, -50); bump(fails, e.data.seller.Team); }
       if (e.event === 'accepted') bps[c.tx] = share;
     }
   }
-  return { rep, at, bps };
+  return { rep, at, fresh, bps };
 }
 
 /**
@@ -203,7 +212,7 @@ function replay(calls: Call[]) {
  */
 export async function verify(raw: Raw, tamper = false): Promise<Proof> {
   const calls = raw.calls.filter((c) => c.ok);
-  const { rep: reps, at: repAt, bps: shares } = replay(calls);
+  const { rep: reps, at: repAt, fresh, bps: shares } = replay(calls);
   // Signers as approved on chain at any time (a later revoke doesn't undo work it took while active).
   const approved = new Map<string, SignerRec>();
   for (const e of eventsOf(calls, 'signer')) approved.set(e.data.address, { model: e.data.model, report: e.data.report, by: e.data.by, active: true });
@@ -230,7 +239,7 @@ export async function verify(raw: Raw, tamper = false): Promise<Proof> {
           tampered = true;
           const commit = calls.filter((c) => c.method === 'commit' && c.signer === rv.signer && inRound(c) && c.block <= rv.block).pop();
           const rep = repAt[`${award.block}:${rv.signer}`] ?? 0;
-          bids.push({ seller: rv.signer, outside: false, price, rep, q: quality(rep), salt: rv.args.salt, hash: commit?.args.hash, revealTx: rv.tx });
+          bids.push({ seller: rv.signer, outside: false, price, rep, newcomer: fresh[`${award.block}:${rv.signer}`], q: quality(rep), salt: rv.args.salt, hash: commit?.args.hash, revealTx: rv.tx });
         }
         for (const ob of calls.filter((c) => c.method === 'add_outside' && inRound(c))) {
           const seller = `outside:${ob.args.handle}`;

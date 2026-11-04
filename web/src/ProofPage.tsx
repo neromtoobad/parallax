@@ -93,7 +93,7 @@ function RoundCard({ r }: { r: Round }) {
       {r.bids.map((b) => (
         <div key={b.seller} className={`bid${b.win ? ' win' : ''}`}>
           <Face account={b.seller} />
-          <span className="who">{b.win ? <b>{nameOf(b.seller)}</b> : nameOf(b.seller)}<small> · {b.outside ? `quality ${b.q}` : `record ${b.rep}`}</small></span>
+          <span className="who">{b.win ? <b>{nameOf(b.seller)}</b> : nameOf(b.seller)}<small> · {b.outside ? `quality ${b.q}` : b.newcomer ? `newcomer, weighed at ${b.rep}` : `record ${b.rep}`}</small></span>
           <span className="p">{units(b.price)}</span>
         </div>
       ))}

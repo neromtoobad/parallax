@@ -53,6 +53,9 @@ const REP_NO_REVEAL: u16 = 20;
 const REP_MIN_BID: u16 = 200;
 /// Where an enlisted agent starts: above probation, below a hired agent, so it has to be cheaper to win.
 const REP_ENLIST: u16 = 300;
+/// An enlisted agent's first parts are weighed as if its record were at least REP_START, so a newcomer can win
+/// work to earn a record with. It ends after NEWCOMER_WINS passed parts, or at its first failed inspection.
+const NEWCOMER_WINS: u32 = 3;
 /// The least an enlisted agent can start with, in USDC units (0.10 USDC).
 const MIN_STAKE: u128 = 100_000;
 /// Enlisted agents under review or active at once, in all and per sponsor.
@@ -428,6 +431,7 @@ impl Parallax {
     pub fn new(owner: AccountId, cfo: AccountId, usdc: AccountId, policy: Policy) -> Self {
         check_policy(&policy);
         emit("policy", json!({"by": owner, "policy": policy}));
+        emit("rules", json!({"newcomer_wins": NEWCOMER_WINS}));
         Self {
             owner,
             cfo,
@@ -715,6 +719,13 @@ impl Parallax {
     }
 
     // ============================================================ owner
+
+    /// Called by the bank itself in the transaction that deploys rule 32, so the history shows from which block
+    /// awards weigh newcomers (a fresh bank says so in `new`).
+    #[private]
+    pub fn mark_rules(&mut self) {
+        emit("rules", json!({"newcomer_wins": NEWCOMER_WINS}));
+    }
 
     /// The account that signs for enlisted agents. Enlisted agents are named <slug>.<operator>.
     pub fn set_operator(&mut self, operator: AccountId) {
@@ -1015,8 +1026,7 @@ impl Parallax {
         // Score = price / quality, compared by cross-multiplying.
         let mut bids: Vec<(Seller, u128, u128)> = vec![];
         for r in l.reveals.iter() {
-            let rep = self.agents.get(&r.agent).map(|a| a.rep).unwrap_or(0);
-            bids.push((Seller::Team(r.agent.clone()), r.price.0, quality(rep)));
+            bids.push((Seller::Team(r.agent.clone()), r.price.0, quality(self.weighed_rep(&r.agent))));
         }
         for b in l.outside.iter() {
             bids.push((Seller::Outside(b.handle.clone()), b.price.0, b.quality_bps as u128));
@@ -1268,6 +1278,13 @@ impl Parallax {
 
     fn agent(&self, a: &AccountId) -> Agent {
         self.agents.get(a).cloned().unwrap_or_else(|| env::panic_str("not an agent"))
+    }
+
+    /// The record an award weighs a bidder by: its own, raised to REP_START for a newcomer on the crew.
+    fn weighed_rep(&self, a: &AccountId) -> u16 {
+        let Some(ag) = self.agents.get(a) else { return 0 };
+        let newcomer = ag.wins < NEWCOMER_WINS && ag.fails == 0 && self.crew.get(a).is_some();
+        if newcomer { ag.rep.max(REP_START) } else { ag.rep }
     }
 
     fn crew_of(&self, a: &AccountId) -> Crew {
