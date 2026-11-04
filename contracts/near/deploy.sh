@@ -100,10 +100,10 @@ viewj() { # viewj <contract> <method> <json>: the JSON result, or null
     python3 -c "import json,sys;r=json.load(sys.stdin).get('result');print(bytes(r['result']).decode() if r else 'null')"
 }
 call() { retry call1 "$@"; }
-call1() { # call <contract> <method> <json> <signer> [deposit]
+call1() { # call <contract> <method> <json> <signer> [deposit]   GAS=<Tgas> for a lighter call
   local sign=sign-with-legacy-keychain
   [ "$4" = "$ROOT" ] && sign=$ROOT_SIGN
-  near contract call-function as-transaction "$1" "$2" json-args "$3" prepaid-gas '100.0 Tgas' \
+  near contract call-function as-transaction "$1" "$2" json-args "$3" prepaid-gas "${GAS:-100}.0 Tgas" \
     attached-deposit "${5:-0 NEAR}" sign-as "$4" $NETCFG $sign send >/dev/null
 }
 
@@ -134,18 +134,22 @@ if ! exists "$BANK"; then
   echo "  deployed the bank"
 elif [ "${UPGRADE:-}" = 1 ]; then
   [ "$NET" = testnet ] || { echo "UPGRADE is for the testnet bank; a mainnet bank deploys fresh" >&2; exit 1; }
-  MIG=$(python3 -c "import json;p=json.load(open('policy-$NET.json'));print(json.dumps({'epoch_secs':p['epoch_secs'],'compute':'$COMPUTE','daily_model_cap':p['daily_model_cap'],'require_tee':p['require_tee']}))")
-  near contract deploy "$BANK" use-file target/near/parallax_near.wasm \
-    with-init-call migrate json-args "$MIG" prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' \
-    $NETCFG sign-with-legacy-keychain send >/dev/null
-  echo "  upgraded the bank and migrated its state"
+  # Already migrated (a re-run): the new policy has daily_model_cap.
+  if [ "$(viewj "$BANK" get_policy '{}' | python3 -c "import json,sys;print('daily_model_cap' in json.load(sys.stdin))")" = False ]; then
+    MIG=$(python3 -c "import json;p=json.load(open('policy-$NET.json'));print(json.dumps({'epoch_secs':p['epoch_secs'],'compute':'$COMPUTE','daily_model_cap':p['daily_model_cap'],'require_tee':p['require_tee']}))")
+    near contract deploy "$BANK" use-file target/near/parallax_near.wasm \
+      with-init-call migrate json-args "$MIG" prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' \
+      $NETCFG sign-with-legacy-keychain send >/dev/null
+    echo "  upgraded the bank and migrated its state"
+  fi
   # What agents and the house hold in their own accounts goes into their balance at the bank, while they still have full keys.
   for a in "${AGENTS[@]}" "$HOUSE"; do
     [ -f "$KEYS/$a.bank-key.json" ] && continue
     HAVE=$(q "{\"request_type\":\"call_function\",\"finality\":\"final\",\"account_id\":\"$USDC\",\"method_name\":\"ft_balance_of\",\"args_base64\":\"$(printf '{"account_id":"%s"}' "$a" | base64)\"}" |
       python3 -c "import json,sys;r=json.load(sys.stdin)['result'];print(json.loads(bytes(r['result'])))")
     if [ "$HAVE" != 0 ]; then
-      call "$USDC" ft_transfer_call "{\"receiver_id\":\"$BANK\",\"amount\":\"$HAVE\",\"msg\":\"balance\"}" "$a" "1 yoctoNEAR"
+      # 60 Tgas: an agent may hold under 0.1 NEAR, and a call holds its whole prepaid gas up front
+      GAS=60 call "$USDC" ft_transfer_call "{\"receiver_id\":\"$BANK\",\"amount\":\"$HAVE\",\"msg\":\"balance\"}" "$a" "1 yoctoNEAR"
       echo "  $a: $HAVE units into its balance at the bank"
     fi
   done
