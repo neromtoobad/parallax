@@ -12,5 +12,5 @@ export const WEB_DIR = process.env.PARALLAX_WEB ?? join(import.meta.dirname, '..
 /** The public origin, for links in deliveries (a built website's address). */
 export const ORIGIN = process.env.PARALLAX_ORIGIN ?? `http://localhost:${PORT}`;
 /** The model every agent calls on NEAR AI Cloud, and the one for pictures. */
-export const MODEL = process.env.PARALLAX_MODEL ?? 'deepseek/deepseek-v4.1-flash';
+export const MODEL = process.env.PARALLAX_MODEL ?? 'deepseek-ai/DeepSeek-V4.1-Flash-1017'; // the TEE build
 export const IMAGE_MODEL = process.env.PARALLAX_IMAGE_MODEL ?? 'black-forest-labs/FLUX.2-klein-4B';

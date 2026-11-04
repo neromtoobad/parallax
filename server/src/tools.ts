@@ -37,6 +37,8 @@ export async function llm(job: Job, agent: Role, o: { system: string; prompt: st
       model: MODEL, max_tokens: maxTokens, temperature: 0.7,
       messages: [{ role: 'system', content: system }, { role: 'user', content: o.prompt }],
       ...(o.json ? { response_format: { type: 'json_object' } } : {}),
+      // The TEE DeepSeek thinks first by default, and the thinking can use up max_tokens before any answer.
+      ...(MODEL.startsWith('deepseek-ai/') ? { chat_template_kwargs: { thinking: false } } : {}),
     },
     // A rough ceiling from the list price, so a runaway call can't empty the budget.
     maxUsd: 0.02 + maxTokens * 2e-6, expectUsd: 0.002 + maxTokens * 6e-7,
