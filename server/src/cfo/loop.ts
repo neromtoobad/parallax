@@ -21,7 +21,7 @@ const AGENT_FLOAT = Number(process.env.PARALLAX_AGENT_FLOAT ?? 0.1);
 /** The house wallet's share of the week's tool budget: enough for the dearest job on mainnet's lean budget. */
 const HOUSE_SHARE = Number(process.env.PARALLAX_HOUSE_SHARE ?? 0.75);
 
-type Overview = { buckets: string[]; epoch: string; epoch_allocated: string; killed: boolean };
+type Overview = { buckets: string[]; epoch: string; epoch_allocated: string; killed: boolean; next_epoch_at?: string };
 type Policy = { epoch_tool_budget: string; max_move: string; reserve_floor: string };
 type AgentRec = { role: string; active: boolean; allowance_epoch: string; allowance: string; topped_up: string };
 type State = { epoch: number; openedAt: number };
@@ -48,17 +48,25 @@ export async function treasuryRound(): Promise<string[]> {
   const team = ROSTER.filter((a) => a.role !== 'messenger').map((a) => accountOf(a.id)).filter((a) => agents.get(a)?.active);
   const budget = fromUnits(policy.epoch_tool_budget), maxMove = fromUnits(policy.max_move);
 
-  // A new week: open the epoch and give out allowances.
+  // A new week. A bank with the week lock says when the next one may open, so every server agrees;
+  // an older bank (the testnet one) leaves it to this server's own record.
   const s = load();
   let epoch = Number(ov.epoch);
-  if (epoch === 0 || s.epoch !== epoch || Date.now() - s.openedAt > WEEK_MS) {
-    const plan = { house: house ? budget * HOUSE_SHARE : 0, each: (budget * (house ? 1 - HOUSE_SHARE : 1)) / Math.max(1, team.length) };
+  const plan = { house: house ? budget * HOUSE_SHARE : 0, each: (budget * (house ? 1 - HOUSE_SHARE : 1)) / Math.max(1, team.length) };
+  const due = ov.next_epoch_at !== undefined
+    ? Date.now() * 1e6 >= Number(ov.next_epoch_at)
+    : epoch === 0 || s.epoch !== epoch || Date.now() - s.openedAt > WEEK_MS;
+  if (due) {
     await call(NEAR.cfo, NEAR.bank, 'open_epoch', { plan_hash: sha256(JSON.stringify(plan)) });
     epoch += 1;
-    for (const a of team) await call(NEAR.cfo, NEAR.bank, 'set_allowance', { agent: a, amount: toUnits(Math.floor(plan.each * 1e6) / 1e6) });
-    if (house && agents.get(house)?.active) await call(NEAR.cfo, NEAR.bank, 'set_allowance', { agent: house, amount: toUnits(Math.floor(plan.house * 1e6) / 1e6) });
     keep({ epoch, openedAt: Date.now() });
     did.push(`opened week ${epoch}: ${plan.each.toFixed(4)} USDC for each agent${house ? `, ${plan.house.toFixed(2)} for the house wallet` : ''}`);
+  }
+  // This week's allowances, for anyone without one yet (a new week, a new hire, or a round cut short).
+  const share = (a: string) => (a === house ? plan.house : plan.each);
+  for (const a of [...team, ...(house && agents.get(house)?.active ? [house] : [])]) {
+    if (Number(agents.get(a)?.allowance_epoch ?? 0) === epoch) continue;
+    await call(NEAR.cfo, NEAR.bank, 'set_allowance', { agent: a, amount: toUnits(Math.floor(share(a) * 1e6) / 1e6) });
   }
 
   // Who needs topping up, and by how much (never past what's left of their allowance).

@@ -89,6 +89,9 @@ pub struct Policy {
     pub revision_secs: u32,
     pub commit_secs: u32,
     pub reveal_secs: u32,
+    /// The shortest a week can be: the CFO can't open the next one sooner, so it can't reset
+    /// epoch_tool_budget and promo_cap early.
+    pub epoch_secs: u32,
 }
 
 #[near(serializers = [borsh, json])]
@@ -231,6 +234,9 @@ pub struct Overview {
     pub bonds_outstanding: U128,
     pub owed: U128,
     pub epoch: U64,
+    /// When this week was opened (nanoseconds; 0 before the first open_epoch), and when the next may open.
+    pub epoch_started: U64,
+    pub next_epoch_at: U64,
     pub epoch_allocated: U128,
     pub epoch_promo: U128,
     pub day_lot_spend: U128,
@@ -255,6 +261,7 @@ pub struct Parallax {
     escrowed: u128,
     bonds_outstanding: u128,
     epoch: u64,
+    epoch_started: u64,
     epoch_allocated: u128,
     epoch_promo: u128,
     day: u64,
@@ -293,6 +300,7 @@ fn check_policy(p: &Policy) {
     require!((p.contributors_bps as u128) <= BPS, "contributors_bps above 10000");
     require!(p.commit_secs > 0 && p.reveal_secs > 0, "bidding windows must be positive");
     require!(p.accept_secs > 0 && p.revision_secs > 0, "job windows must be positive");
+    require!(p.epoch_secs > 0, "a week must have a length");
 }
 
 fn seller_key(s: &Seller) -> String {
@@ -318,6 +326,8 @@ impl Parallax {
             escrowed: 0,
             bonds_outstanding: 0,
             epoch: 1,
+            // The first week can open at once; each one after waits epoch_secs.
+            epoch_started: 0,
             epoch_allocated: 0,
             epoch_promo: 0,
             day: 0,
@@ -382,7 +392,10 @@ impl Parallax {
     pub fn open_epoch(&mut self, plan_hash: String) {
         self.only_cfo();
         self.alive();
+        let now = env::block_timestamp();
+        require!(now >= self.next_epoch_at(), "this week isn't over yet");
         self.epoch += 1;
+        self.epoch_started = now;
         self.epoch_allocated = 0;
         self.epoch_promo = 0;
         emit("epoch", json!({"epoch": U64(self.epoch), "plan": plan_hash}));
@@ -850,6 +863,8 @@ impl Parallax {
             bonds_outstanding: U128(self.bonds_outstanding),
             owed: U128(self.owed_total),
             epoch: U64(self.epoch),
+            epoch_started: U64(self.epoch_started),
+            next_epoch_at: U64(self.next_epoch_at()),
             epoch_allocated: U128(self.epoch_allocated),
             epoch_promo: U128(self.epoch_promo),
             day_lot_spend: U128(self.day_lot_spend),
@@ -906,6 +921,15 @@ impl Parallax {
 // ------------------------------------------------------------------ internals
 
 impl Parallax {
+    /// When the next week may open: at once before the first open_epoch, then epoch_secs after the last.
+    fn next_epoch_at(&self) -> u64 {
+        if self.epoch_started == 0 {
+            0
+        } else {
+            self.epoch_started + self.policy.epoch_secs as u64 * NS
+        }
+    }
+
     fn only_owner(&self) {
         require!(env::predecessor_account_id() == self.owner, "only the owner");
     }

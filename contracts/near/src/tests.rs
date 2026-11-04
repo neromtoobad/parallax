@@ -33,6 +33,7 @@ fn policy() -> Policy {
         revision_secs: 600,
         commit_secs: 20,
         reveal_secs: 20,
+        epoch_secs: 7 * 86_400,
     }
 }
 
@@ -131,6 +132,30 @@ fn rule_05_allowances_stay_inside_the_weekly_budget() {
     at("cfo.testnet", 0);
     s.set_allowance(acc("writer.testnet"), U128(6 * D));
     s.set_allowance(acc("designer.testnet"), U128(5 * D));
+}
+
+#[test]
+fn rule_05_a_week_lasts_at_least_epoch_secs() {
+    let mut s = setup();
+    at("cfo.testnet", 0);
+    s.open_epoch("week 2".into());
+    assert_eq!(s.overview().epoch.0, 2);
+    assert_eq!(s.overview().next_epoch_at.0, (T0 + 7 * 86_400) * NS);
+    at("cfo.testnet", 7 * 86_400);
+    s.open_epoch("week 3".into());
+    assert_eq!(s.overview().epoch.0, 3);
+}
+
+#[test]
+#[should_panic(expected = "this week isn't over yet")]
+fn rule_05_the_cfo_cannot_open_a_new_week_early() {
+    let mut s = setup();
+    at("cfo.testnet", 0);
+    s.open_epoch("week 2".into());
+    s.set_allowance(acc("writer.testnet"), U128(10 * D));
+    // A second week now would reset the budget and allow another 10 USDC of allowances.
+    at("cfo.testnet", 7 * 86_400 - 1);
+    s.open_epoch("week 3".into());
 }
 
 #[test]

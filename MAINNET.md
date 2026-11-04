@@ -16,7 +16,7 @@ Each job adds about 2.5 KB to the bank's state (0.025 NEAR). If you run more tha
 
 Mainnet list prices are lower than testnet's: Flyers $1, Find customers $2, Website $3.
 
-The policy is [`contracts/near/policy-mainnet.json`](contracts/near/policy-mainnet.json): it moves at most 3 USDC at a time without your co-sign, budgets 4 USDC a week for top-ups (three quarters to the house wallet, the rest to the agents), pays at most 10 USDC of lots a day, keeps no reserve floor and has no promo budget. You can change any of it later with `set_policy`.
+The policy is [`contracts/near/policy-mainnet.json`](contracts/near/policy-mainnet.json): it moves at most 3 USDC at a time without your co-sign, budgets 4 USDC a week for top-ups (three quarters to the house wallet, the rest to the agents) and the contract won't open a new week sooner than 7 days after the last (`epoch_secs`), pays at most 10 USDC of lots a day, keeps no reserve floor and has no promo budget. You can change any of it later with `set_policy`.
 
 ## Steps
 
@@ -109,7 +109,7 @@ near contract call-function as-transaction bank.useparallax.near owner_withdraw 
 
 ## Not done yet
 
-- **No outside review of the contract.** It has 27 tests and the swarm simulation, and the policy caps and kill switch limit what a bug can cost. Start with small caps.
+- **No outside review of the contract.** It has 37 tests and the swarm simulation, and the policy caps and kill switch limit what a bug can cost. Start with small caps.
 - **Paying from another chain.** 1Click quotes are dry. 1Click can deliver USDC to an account but can't name the job, so a real payment would land in Parallax's account and the server would forward it into the job's escrow: a short custody step to build and to state on the site.
 - **Gas per job.** A job is about 35 transactions (lots, sealed bids, reveals, awards, inspections, delivery, acceptance), roughly 0.02–0.05 NEAR, which agents and the CFO pay. On $1 jobs that matters; a relayer for the bid transactions, or fewer lots on cheap jobs, would cut it. With the lean funding, each agent's 0.03 NEAR covers about 25 jobs.
 - **The docs describe testnet.** The site's network labels and footer links follow the deployment, but the docs pages name the testnet accounts.

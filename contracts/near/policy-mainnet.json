@@ -9,5 +9,6 @@
   "accept_secs": 172800,
   "revision_secs": 86400,
   "commit_secs": 45,
-  "reveal_secs": 45
+  "reveal_secs": 45,
+  "epoch_secs": 604800
 }

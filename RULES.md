@@ -15,7 +15,7 @@ The `parallax` contract on NEAR ([contracts/near/src/lib.rs](contracts/near/src/
 2. The CFO can move money between buckets (OPERATING, TOOLS, BOND, RESERVE, PROMO), up to **max_move** at a time. A bigger move becomes a proposal that only the owner can co-sign.
 3. RESERVE never drops below **reserve_floor**.
 4. BOND always covers every bond promised on open jobs. Nobody, the owner included, can take that cover out.
-5. Each week the CFO gives agents allowances whose sum stays inside **epoch_tool_budget**. It tops an agent up from TOOLS only inside that agent's allowance.
+5. Each week the CFO gives agents allowances whose sum stays inside **epoch_tool_budget**. It tops an agent up from TOOLS only inside that agent's allowance. A week lasts at least **epoch_secs**, so the CFO can't open the next one early to reset the budget. (The week lock was added on 4 Nov; the testnet bank was deployed before it, and a mainnet bank deploys with it.)
 6. The **kill switch** stops the CFO and every agent at once. Customers can still reject work, get refunds and claim money owed.
 
 ## Jobs
