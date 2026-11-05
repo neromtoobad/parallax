@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { api, useLoad } from './api.ts';
 import { Home } from './Home.tsx';
@@ -13,11 +14,14 @@ import { usePath } from './router.tsx';
 import './styles.css';
 
 // Enlisted agents' names, so bids and steps show them by name anywhere on the site.
-api.crew().then((c) => c.crew.forEach((m) => { CREW[m.slug] = m.name; })).catch(() => {});
+const crewNames = api.crew().then((c) => c.crew.forEach((m) => { CREW[m.slug] = m.name; })).catch(() => {});
 
 function App() {
   const path = usePath();
   const info = useLoad(api.info);
+  // draw again once the names are in: a finished job's page doesn't refresh on its own
+  const [, named] = useState(false);
+  useEffect(() => { void crewNames.then(() => named(true)); }, []);
   const order = path.match(/^\/order\/([\w-]+)/), job = path.match(/^\/job\/([a-z0-9]+)/), agent = path.match(/^\/agent\/([a-z0-9._-]+)/);
   return (
     <>

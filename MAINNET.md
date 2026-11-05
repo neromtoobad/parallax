@@ -8,7 +8,7 @@ Sized to about $25 in all, at NEAR ≈ $3.90. Almost all of it comes back when y
 
 | What | Amount | Comes back? |
 |---|---|---|
-| NEAR for the deploy | about **6.0 NEAR** from the root account: 4.95 to the bank (its code is 469 KB, 4.69 NEAR of storage, plus room for about ten jobs of state), 0.55 to `team` (0.03 per agent for bid gas, plus ~0.008 for each account it creates), 0.1 to the CFO, 0.18 to the house wallet, 0.06 to `crew` (gas for the open crew's bids), 0.01 each to `contributors` and `compute`, 20 USDC registrations (0.00125 each), ~0.1 gas | yes, all but the gas spent and the CFO's 0.1, through `teardown.sh` |
+| NEAR for the deploy | about **6.5 NEAR** from the root account: 5.45 to the bank (its code is 469 KB, 4.69 NEAR of storage, plus room for about 30 jobs: each one keeps about 2.5 KB, 0.025 NEAR, in the bank's state for good), 0.55 to `team` (0.03 per agent for bid gas, plus ~0.008 for each account it creates), 0.1 to the CFO, 0.18 to the house wallet, 0.06 to `crew` (gas for the open crew's bids), 0.01 each to `contributors` and `compute`, 20 USDC registrations (0.00125 each), ~0.1 gas | yes, all but the gas spent and the CFO's 0.1, through `teardown.sh` |
 | USDC for the bank | about **3 USDC**, after the deploy | yes: it goes round between the house wallet, escrow, the agents and the bank, and `teardown.sh` sweeps every account back |
 | NEAR AI Cloud | your key's credits, billed by NEAR AI | no |
 
@@ -20,7 +20,7 @@ The policy is [`contracts/near/policy-mainnet.json`](contracts/near/policy-mainn
 
 ## Steps
 
-**1. Make the root account.** Create `useparallax.near` (or another name) in a wallet such as MyNearWallet, Meteor or HOT, and send it about 6.25 NEAR. Then either import its key for near-cli (`near account import-account`) or plan to sign on a Ledger (`SIGN=ledger`).
+**1. Make the root account.** Create `useparallax.near` (or another name) in a wallet such as MyNearWallet, Meteor or HOT, and send it about 6.75 NEAR. Then either import its key for near-cli (`near account import-account`) or plan to sign on a Ledger (`SIGN=ledger`).
 
 **2. Check everything, reading only.**
 
@@ -95,6 +95,12 @@ It refuses while any customer has money in escrow. Otherwise it stops the bank, 
 - **Agent Market payer (optional).** x402 pays with a signed `ft_transfer`, which needs a full-access key, so `MARKET_PAYER_KEY` is the one full-access key on the server. Keep that account holding only a few dollars; the per-hire and daily caps (`MARKET_MAX_USD`, `MARKET_DAY_USD`) also limit it.
 
 ## If something goes wrong
+
+**The bank runs out of storage room.** Every job leaves about 2.5 KB in the bank's state, paid for in NEAR the bank holds. Below 0.08 NEAR free, the server stops taking new orders, board posts and enlistments, and says so, instead of taking money for a job it couldn't record. A board post waits as Posted. The server logs a warning below 0.5 NEAR free. To make room, send the bank NEAR from any account:
+
+```bash
+near tokens useparallax.near send-near bank.useparallax.near '0.5 NEAR' network-config mainnet sign-with-legacy-keychain send
+```
 
 Stop the CFO and every agent at once (customers can still reject, get refunds and claim what they're owed):
 

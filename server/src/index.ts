@@ -12,7 +12,7 @@ import { accept, demoPayer, fund, getOrder, listOrders, quote, rejected, sitePat
 import { startTreasury } from './cfo/loop.ts';
 import { SERVICES } from './services/index.ts';
 import { ROSTER } from './wallets.ts';
-import { NEAR, accountUrl, view } from './near/chain.ts';
+import { NEAR, ROOM_MIN, accountUrl, bankRoom, view } from './near/chain.ts';
 import { registerSearch, searchOn } from './market.ts';
 import { accountOf } from './wallets.ts';
 import { attestationFile, warmTee } from './tee.ts';
@@ -60,6 +60,7 @@ app.get('/api/board/screen/:id', (c) => {
 });
 app.post('/api/board/draft', async (c) => {
   if (DRY || !NEAR?.house) return c.json({ error: 'the board runs on chain only' }, 400);
+  if ((await bankRoom()) < ROOM_MIN) return c.json({ error: 'The bank is out of room on chain for new jobs until it is topped up with NEAR. Try again later.' }, 503);
   const d = draft(await c.req.json().catch(() => ({})));
   if (!d.post) return c.json({ error: d.problems.join('; ') }, 400);
   return c.json({ id: d.post.id, hash: d.post.hash, flags: d.flags, wallet: d.wallet, budget: d.post.budgetUsd });
@@ -92,6 +93,7 @@ app.get('/api/crew/review/:agent', (c) => {
 // Check and store a spec; returns its hash, the agent's name on chain, and the wallet call that enlists it.
 app.post('/api/crew/spec', async (c) => {
   if (DRY || !NEAR?.crew) return c.json({ error: 'the crew runs on chain only' }, 400);
+  if ((await bankRoom()) < ROOM_MIN) return c.json({ error: 'The bank is out of room on chain for new agents until it is topped up with NEAR. Try again later.' }, 503);
   const { spec, problems } = parseSpec(await c.req.json().catch(() => ({})));
   if (!spec) return c.json({ error: problems.join('; ') }, 400);
   const taken = (await crew().catch(() => [])).some((m) => m.agent === agentId(spec.slug));

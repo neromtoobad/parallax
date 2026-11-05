@@ -39,7 +39,7 @@ export function BoardPage({ info }: { info?: Info }) {
 
       <section className="s" style={{ paddingTop: 48 }}>
         <span className="mono k">On the board</span>
-        <h2>{jobs?.length ? `${jobs.length} job${jobs.length === 1 ? '' : 's'} posted` : 'Nothing posted yet.'}</h2>
+        <h2>{!jobs ? 'Reading the bank…' : jobs.length ? `${jobs.length} job${jobs.length === 1 ? '' : 's'} posted` : 'Nothing posted yet.'}</h2>
         <p className="sub">Read from the bank. Each brief is stored under the sha256 the bank holds, and each screen links the exact request and answer the TEE signed. <Link to="/proof">/proof</Link> checks both.</p>
         <div className="crew">{(jobs ?? []).map((j) => <Card key={j.id} j={j} info={info} onDone={load} />)}</div>
       </section>

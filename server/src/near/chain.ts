@@ -249,6 +249,25 @@ export async function nearBalance(id: string): Promise<number> {
   }
 }
 
+/**
+ * NEAR the bank holds beyond what its code and state lock up. Every job's lots stay in its state for good (about
+ * 3 KB, 0.03 NEAR a job), so when this runs out the bank can't store a new lot and an order would fail halfway.
+ * Read at most once a minute.
+ */
+let room = { at: 0, near: Infinity };
+export async function bankRoom(): Promise<number> {
+  if (!NEAR || Date.now() - room.at < 60_000) return room.near;
+  try {
+    const a: any = await provider.viewAccount({ accountId: NEAR.bank, blockQuery: { finality: 'optimistic' } } as any);
+    const free = Number((BigInt(a.amount) - BigInt(a.storage_usage) * 10n ** 19n) / 10n ** 18n) / 1e6;
+    room = { at: Date.now(), near: free };
+    if (free < 0.5) console.warn(`bank: only ${free.toFixed(3)} NEAR left for storage; send NEAR to ${NEAR.bank}`);
+  } catch { /* keep the last reading */ }
+  return room.near;
+}
+/** Below this the CFO takes no new work: enough for a job or two in flight to finish. */
+export const ROOM_MIN = 0.08;
+
 export async function usdcOf(id: string): Promise<number> {
   return fromUnits(await view<string>(NEAR!.usdc, 'ft_balance_of', { account_id: id }));
 }

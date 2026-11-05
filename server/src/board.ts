@@ -13,7 +13,7 @@ import { randomBytes } from 'node:crypto';
 import { DATA_DIR, DRY } from './config.ts';
 import { Job } from './job.ts';
 import { NEARAI_HOST } from './nearai.ts';
-import { NEAR, call, canSign, fromUnits, sha256, toUnits, view } from './near/chain.ts';
+import { NEAR, ROOM_MIN, bankRoom, call, canSign, fromUnits, sha256, toUnits, view } from './near/chain.ts';
 import { getOrder, startBoardJob } from './orders.ts';
 import { briefOf } from './services/check.ts';
 import { fields } from './services/board.ts';
@@ -141,6 +141,8 @@ export async function screenPosted() {
 }
 
 async function screen(j: Posted) {
+  // with no room left on chain a taken job would fail at its auction; it waits as Posted, money untouched
+  if ((await bankRoom()) < ROOM_MIN) return console.warn(`board: ${j.id} waits: the bank is out of storage room`);
   const text = briefFile(j.spec_hash), p = postOf(j.id);
   let pass = false, note = '', flags: string[] = [], request: string | undefined, answer: string | undefined, bill: string | undefined;
   let tee: Screen['tee'];

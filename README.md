@@ -152,7 +152,7 @@ To deploy your own copy, create a root account from the faucet and run [`contrac
 
 ```bash
 near account create-account sponsor-by-faucet-service my-parallax.testnet autogenerate-new-keypair save-to-legacy-keychain network-config testnet create
-cd contracts/near && ROOT=my-parallax.testnet FUND_BANK=5.05 FUND_USDC=1.7 FUND_AGENT=0.1 ./deploy.sh
+cd contracts/near && ROOT=my-parallax.testnet FUND_BANK=5.55 FUND_USDC=1.7 FUND_AGENT=0.1 ./deploy.sh
 ```
 
 It creates the bank, the test USDC, the CFO, the contributors and compute accounts, the house wallet and 14 agents, and hires the agents. It leaves the CFO, every agent and the house wallet with one function-call key on the bank, moves the agents' and the house's full access to your root key, and writes `deployments/near-testnet.json`. Re-running picks up where a run stopped.

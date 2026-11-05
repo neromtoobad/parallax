@@ -10,7 +10,7 @@ import { publish } from './bus.ts';
 import { Job } from './job.ts';
 import { assignmentFor, auction, closeLots, type LotRecord } from './lots.ts';
 import { NEARAI_HOST } from './nearai.ts';
-import { NEAR, balanceOf, call, isAccountId, sha256, toUnits, txUrl, view } from './near/chain.ts';
+import { NEAR, ROOM_MIN, balanceOf, bankRoom, call, isAccountId, sha256, toUnits, txUrl, view } from './near/chain.ts';
 import { priceFor, recordSpend } from './cfo/treasury.ts';
 import { findService, type Delivery } from './services/index.ts';
 import { briefOf } from './services/check.ts';
@@ -66,6 +66,7 @@ export async function quote(serviceId: string, input: Record<string, string>, cu
   if (customer && !isAccountId(customer)) throw new Error('that is not a NEAR account');
   for (const f of svc.fields) if (!f.optional && !input[f.key]?.trim()) throw new Error(`${f.label} is missing`);
   const clean = Object.fromEntries(svc.fields.map((f) => [f.key, String(input[f.key] ?? '').slice(0, f.long ? 600 : 160).trim()]));
+  if (!DRY && (await bankRoom()) < ROOM_MIN) throw new Error('The bank is out of room on chain for new jobs until it is topped up with NEAR. Nothing was charged; try again later.');
   const policy = DRY ? { min_margin_bps: 2000 } : await view<{ min_margin_bps: number }>(NEAR!.bank, 'get_policy');
   const now = new Date().toISOString();
   const o: Order = {

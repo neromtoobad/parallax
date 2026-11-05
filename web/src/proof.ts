@@ -53,12 +53,14 @@ export type JobProof = { job: ChainJob; outcome: string; rounds: Round[]; checks
 export type Proof = { jobs: JobProof[]; checks: Check[]; total: number; passed: number; txs: number };
 
 const post = async (url: string, body: unknown): Promise<any> => {
-  // Free public nodes rate-limit; wait and ask again.
+  // Free public nodes rate-limit; wait and ask again. A limited answer often comes without CORS headers, so the
+  // browser reports it as a failed fetch rather than a 429: retry those too.
   for (let tries = 1; ; tries++) {
-    const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-    if (r.ok) return r.json();
-    if (r.status !== 429 || tries === 6) throw new Error(`${new URL(url).host} answered ${r.status}`);
-    await new Promise((f) => setTimeout(f, 800 * tries));
+    const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).catch((e: Error) => e);
+    if (!(r instanceof Error) && r.ok) return r.json();
+    const why = r instanceof Error ? r.message : `answered ${r.status}`;
+    if ((!(r instanceof Error) && r.status !== 429 && r.status < 500) || tries === 8) throw new Error(`${new URL(url).host} ${why}`);
+    await new Promise((f) => setTimeout(f, 1000 * tries));
   }
 };
 const text = (b64: string) => new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
