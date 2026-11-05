@@ -245,14 +245,17 @@ async function untilChain(t: number) {
  * After delivery: each winner files the hash of its part (its steps and calls in the job), and the CFO
  * inspects it. The bank won't take the job's delivery while a lot is still open, so this runs first.
  */
-export async function closeLots(orderId: string, lots: LotRecord[], job: Job | any, jobPassed: boolean, caught = false): Promise<LotRecord[]> {
+/**
+ * `spare` names the parts that pass even though the job failed, with why: the check that caught the problem, or
+ * a part that never got to run because an earlier one broke. Only the parts left fail inspection and lose their bonds.
+ */
+export async function closeLots(orderId: string, lots: LotRecord[], job: Job | any, jobPassed: boolean, spare: (l: LotRecord) => string | undefined = () => undefined): Promise<LotRecord[]> {
   for (const l of lots.filter((x) => x.status === 'awarded')) {
     const mine = (x: { agent: string }) => l.roles.includes(x.agent as Role) || x.agent === l.winnerRole;
     const part = l.hire?.textHash ?? sha256(JSON.stringify({ steps: (job?.steps ?? []).filter(mine), receipt: (job?.receipt ?? []).filter(mine) }));
-    // when the auditor stops a job, the check was done right: only the parts that made the work fail (and lose their bonds)
-    const checker = caught && l.roles.includes('auditor');
-    const pass = jobPassed || checker;
-    const note = jobPassed ? `${l.title}: delivered in a job the customer received` : checker ? `${l.title}: caught the problem that stopped the job` : `${l.title}: the job failed`;
+    const why = jobPassed ? undefined : spare(l);
+    const pass = jobPassed || !!why;
+    const note = jobPassed ? `${l.title}: delivered in a job the customer received` : why ? `${l.title}: ${why}` : `${l.title}: the job failed`;
     try {
       if (!DRY) {
         if (String(l.winner).startsWith('outside:')) await call(NEAR!.cfo, NEAR!.bank, 'deliver_outside', { lot: l.id, deliverable: part, receipt: l.hire?.receipt ?? '' });

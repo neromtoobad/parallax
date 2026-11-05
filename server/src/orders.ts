@@ -123,7 +123,11 @@ async function run(o: Order) {
     let d: Delivery | undefined, err: string | undefined;
     try { d = await svc.run(job, o.input); } catch (e: any) { err = String(e?.message ?? e).slice(0, 200); job.log('cfo', 'error', err); }
     const pass = !!d?.check.pass;
-    o.lots = clean(await closeLots(o.id, lots, job, pass, !!d && !pass));
+    // when the auditor stops a job, the check did its work; when a part breaks, the parts that never ran did nothing wrong
+    const culprit = err && /^([a-z]+(?:-\d)?):/.exec(err)?.[1];
+    const spare = (l: LotRecord) => d && l.roles.includes('auditor') ? 'caught the problem that stopped the job'
+      : culprit && !l.roles.includes(culprit as any) && l.winnerRole !== culprit ? `never ran: the job stopped at ${culprit}` : undefined;
+    o.lots = clean(await closeLots(o.id, lots, job, pass, spare));
     o.steps = job.steps; o.receipt = job.receipt;
     if (!d || !pass) {
       o.state = 'failed'; o.error = err ?? `The auditor stopped it: ${d!.check.notes.join('; ')}`;
