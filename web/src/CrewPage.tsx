@@ -163,7 +163,7 @@ function Card({ m, info, onDone }: { m: CrewMember; info?: Info; onDone: () => v
     <div className="card crewcard">
       <div className="head">
         <span className="av out">{m.name[0]?.toUpperCase()}</span>
-        <div><b>{m.name}</b><small className="mono">{m.role ?? m.spec?.role} · {m.slug}</small></div>
+        <div><Link to={`/agent/${m.agent}`} style={{ color: 'inherit' }}><b>{m.name}</b></Link><small className="mono">{m.role ?? m.spec?.role} · {m.slug}</small></div>
         <span className={`badge ${tone}`}>{label}</span>
       </div>
       <div className="stats">

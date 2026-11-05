@@ -77,7 +77,10 @@ fn bid(s: &mut Parallax, lot: u64, who: &str, price: u128, secs: u64) {
     s.commit(lot, h);
 }
 
+/// Reveals a bid, first sending the bidder the bond it locks (rule 36), so each test's balances read as before
+/// once the bond comes back.
 fn reveal(s: &mut Parallax, lot: u64, who: &str, price: u128, secs: u64) {
+    deposit(s, "ada.testnet", price * 2_000 / 10_000, &format!("fund:{}", who));
     at(who, secs);
     s.reveal(lot, U128(price), "salt".into());
 }
@@ -388,7 +391,7 @@ fn rule_13_acceptance_pays_winners_contributors_and_the_company() {
     s.accept("j1".into());
     // Sole bidder is paid the reserve (1); margin 1; contributors 10% of it.
     assert_eq!(s.get_agent(acc("writer.testnet")).unwrap().earned.0, D);
-    assert_eq!(s.balance_of(acc("writer.testnet")).0, D);
+    assert_eq!(s.balance_of(acc("writer.testnet")).0, D + 60_000); // its pay, and its bond back
     assert_eq!(b(&s, Bucket::Operating) - before, D - D / 10);
     assert!(get_logs().iter().any(|l| l.contains("\"contributors\":\"100000\"")));
 }
@@ -1143,7 +1146,7 @@ fn rule_34_a_taken_job_is_auctioned_and_paid_like_any_job() {
     s.submit_job("bb01".into(), "files".into());
     at("ada.testnet", 80);
     s.accept("bb01".into());
-    assert_eq!(s.balance_of(acc("writer.testnet")).0, D); // alone on the lot: paid its reserve
+    assert_eq!(s.balance_of(acc("writer.testnet")).0, D + 80_000); // alone on the lot: paid its reserve, and its bond back
     assert_eq!(s.overview().escrowed.0, 0);
 }
 
@@ -1203,4 +1206,150 @@ fn rule_35_an_untaken_post_can_be_withdrawn() {
     s.decline_job("bb01".into(), "nobody took it".into(), None);
     assert_eq!(s.get_job("bb01".into()).unwrap().state, JobState::Refunded);
     assert_eq!(s.overview().escrowed.0, 0);
+}
+
+// ---------------------------------------------------------------- rule 36: bonds
+
+/// A reveal with no bond sent first, so the test sees exactly what the bank locks.
+fn backed_reveal(s: &mut Parallax, lot: u64, who: &str, price: u128, secs: u64) {
+    at(who, secs);
+    s.reveal(lot, U128(price), "salt".into());
+}
+
+/// Job j1 with one open lot; writer.testnet and scout.testnet hold 1 USDC each at the bank.
+fn bonded() -> (Parallax, u64) {
+    let mut s = setup();
+    funded(&mut s, "j1");
+    topped(&mut s, "writer.testnet", D);
+    topped(&mut s, "scout.testnet", D);
+    at("cfo.testnet", 0);
+    let lot = s.open_lot("j1".into(), "copy".into(), vec![], U128(D));
+    (s, lot)
+}
+
+#[test]
+fn rule_36_revealing_a_bid_locks_a_fifth_of_its_price() {
+    let (mut s, lot) = bonded();
+    bid(&mut s, lot, "writer.testnet", 300_000, 1);
+    backed_reveal(&mut s, lot, "writer.testnet", 300_000, 21);
+    assert_eq!(s.balance_of(acc("writer.testnet")).0, D - 60_000);
+    assert_eq!(s.bonds_of(acc("writer.testnet"), vec![lot]), vec![(lot, U128(60_000))]);
+    assert_eq!(s.overview().held.0, 2 * D); // still the agent's money, inside the bank
+    assert!(get_logs().iter().any(|l| l.contains("\"bond\"") && l.contains("\"amount\":\"60000\"")));
+}
+
+#[test]
+#[should_panic(expected = "balance can't cover the bond")]
+fn rule_36_a_bid_its_bidder_cant_back_is_refused() {
+    let mut s = setup();
+    funded(&mut s, "j1");
+    at("cfo.testnet", 0);
+    let lot = s.open_lot("j1".into(), "copy".into(), vec![], U128(D));
+    bid(&mut s, lot, "writer.testnet", 300_000, 1);
+    backed_reveal(&mut s, lot, "writer.testnet", 300_000, 21);
+}
+
+#[test]
+fn rule_36_losers_get_their_bonds_back_at_the_award() {
+    let (mut s, lot) = bonded();
+    bid(&mut s, lot, "writer.testnet", 300_000, 1);
+    bid(&mut s, lot, "scout.testnet", 400_000, 2);
+    backed_reveal(&mut s, lot, "writer.testnet", 300_000, 21);
+    backed_reveal(&mut s, lot, "scout.testnet", 400_000, 22);
+    at("anyone.testnet", 41);
+    s.award(lot);
+    assert_eq!(s.balance_of(acc("scout.testnet")).0, D);
+    assert!(s.bonds_of(acc("scout.testnet"), vec![lot]).is_empty());
+    assert_eq!(s.balance_of(acc("writer.testnet")).0, D - 60_000); // the winner's stays on its work
+    assert!(get_logs().iter().any(|l| l.contains("\"bond_back\"") && l.contains("\"why\":\"lost\"")));
+}
+
+#[test]
+fn rule_36_the_winner_gets_its_bond_back_when_its_work_passes() {
+    let (mut s, lot) = bonded();
+    bid(&mut s, lot, "writer.testnet", 300_000, 1);
+    backed_reveal(&mut s, lot, "writer.testnet", 300_000, 21);
+    at("anyone.testnet", 41);
+    s.award(lot);
+    at("writer.testnet", 50);
+    s.deliver(lot, "draft".into(), None);
+    at("cfo.testnet", 60);
+    s.inspect(lot, true, "good".into());
+    assert_eq!(s.balance_of(acc("writer.testnet")).0, D);
+    assert!(s.bonds_of(acc("writer.testnet"), vec![lot]).is_empty());
+}
+
+#[test]
+fn rule_36_failed_work_pays_the_bond_to_the_customer() {
+    let (mut s, lot) = bonded();
+    bid(&mut s, lot, "writer.testnet", 300_000, 1);
+    backed_reveal(&mut s, lot, "writer.testnet", 300_000, 21);
+    at("anyone.testnet", 41);
+    s.award(lot);
+    at("writer.testnet", 50);
+    s.deliver(lot, "draft".into(), None);
+    at("cfo.testnet", 60);
+    s.inspect(lot, false, "missed the brief".into());
+    assert_eq!(s.balance_of(acc("writer.testnet")).0, D - 60_000);
+    assert_eq!(s.overview().held.0, 2 * D - 60_000); // the bond left the bank, to ada
+    assert!(s.bonds_of(acc("writer.testnet"), vec![lot]).is_empty());
+    assert!(get_logs().iter().any(|l| l.contains("\"slash\"") && l.contains("\"to\":\"ada.testnet\"")));
+}
+
+// ---------------------------------------------------------------- rule 37: struck off
+
+/// Nia wins a lot on a fresh job alone, and its work fails inspection.
+fn nia_fails(s: &mut Parallax, job: &str, t: u64) {
+    funded(s, job);
+    at("cfo.testnet", t);
+    let lot = s.open_lot(job.into(), "copy".into(), vec!["writer".into()], U128(D));
+    at("crew.testnet", t + 1);
+    s.crew_commit(acc(NIA), lot, commit_hash(lot, &acc(NIA), 100_000, "salt"));
+    at("crew.testnet", t + 21);
+    s.crew_reveal(acc(NIA), lot, U128(100_000), "salt".into());
+    at("anyone.testnet", t + 41);
+    s.award(lot);
+    at("crew.testnet", t + 50);
+    s.crew_deliver(acc(NIA), lot, "draft".into(), None);
+    at("cfo.testnet", t + 60);
+    s.inspect(lot, false, "missed the brief".into());
+}
+
+#[test]
+fn rule_37_an_enlisted_agent_is_struck_off_at_its_third_failed_inspection() {
+    let mut s = passed();
+    nia_fails(&mut s, "j1", 100);
+    nia_fails(&mut s, "j2", 200);
+    assert_eq!(s.get_crew(acc(NIA)).unwrap().state, CrewState::Active);
+    nia_fails(&mut s, "j3", 300);
+    let c = s.get_crew(acc(NIA)).unwrap();
+    assert_eq!(c.state, CrewState::Retired);
+    assert!(c.note.contains("struck off"));
+    assert!(!s.get_agent(acc(NIA)).unwrap().active);
+    // three bonds of 0.02 went to the customer, and the rest of its stake back to sam
+    assert_eq!(s.balance_of(acc(NIA)).0, 0);
+    assert!(get_logs().iter().any(|l| l.contains("\"cash_out\"") && l.contains("\"to\":\"sam.testnet\"") && l.contains("\"amount\":\"440000\"")));
+}
+
+#[test]
+fn rule_37_hired_agents_are_not_struck_off() {
+    let mut s = setup();
+    topped(&mut s, "writer.testnet", D);
+    for (i, job) in ["j1", "j2", "j3"].iter().enumerate() {
+        let t = 100 * (i as u64 + 1);
+        funded(&mut s, job);
+        at("cfo.testnet", t);
+        let lot = s.open_lot((*job).into(), "copy".into(), vec![], U128(D));
+        bid(&mut s, lot, "writer.testnet", 100_000, t + 1);
+        backed_reveal(&mut s, lot, "writer.testnet", 100_000, t + 21);
+        at("anyone.testnet", t + 41);
+        s.award(lot);
+        at("writer.testnet", t + 50);
+        s.deliver(lot, "draft".into(), None);
+        at("cfo.testnet", t + 60);
+        s.inspect(lot, false, "missed the brief".into());
+    }
+    let a = s.get_agent(acc("writer.testnet")).unwrap();
+    assert_eq!(a.fails, 3);
+    assert!(a.active);
 }

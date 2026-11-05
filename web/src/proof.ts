@@ -197,7 +197,7 @@ function replay(calls: Call[]) {
     if (c.method === 'hire' && !rep.has(c.args.agent)) rep.set(c.args.agent, 500);
     for (const e of c.events) {
       if (e.event === 'enlist') { rep.set(e.data.agent, 300); crew.add(e.data.agent); } // enlisted agents start below a hire
-      if (e.event === 'rules') newcomerWins = Number(e.data.newcomer_wins ?? 0);
+      if (e.event === 'rules' && e.data.newcomer_wins !== undefined) newcomerWins = Number(e.data.newcomer_wins);
       const lot = Number(e.data.lot);
       if (e.event === 'commit') setOf(sealed, lot).add(e.data.agent);
       if (e.event === 'reveal') setOf(shown, lot).add(e.data.agent);
@@ -394,6 +394,8 @@ export async function verify(raw: Raw, tamper = false): Promise<Proof> {
   checks.push(...(await crewChecks(calls, raw, approved)));
   // 8. The board: briefs, and screens whose signed request and answer we can read.
   checks.push(...(await boardChecks(calls, raw, approved)));
+  // 9. Bonds: each revealed bid locks its share, and each bond comes back or pays the customer.
+  checks.push(...bondChecks(calls, raw));
   const all = [...checks, ...jobs.flatMap((j) => [...j.rounds.flatMap((r) => r.checks), ...j.checks])];
   return { jobs, checks, total: all.length, passed: all.filter((c) => c.ok).length, txs: raw.calls.length };
 }
@@ -478,6 +480,58 @@ async function boardChecks(calls: Call[], raw: Raw, approved: Map<string, Signer
       out.push({ ok: moved, what: `${who} money back`, detail: moved ? `${units(amt)} went back to ${to}` : `no refund to ${to} in that transaction`, tx: e.call.tx });
     }
   }
+  return out;
+}
+
+/**
+ * From the block where the bank starts taking bonds (its `rules` event with bond_bps): every revealed bid locked
+ * bond_bps of its price in the same transaction; a loser's bond came back at the award and the winner's when its
+ * work passed, each exactly once and for the amount locked; failed work paid the bond to the job's customer in the
+ * same transaction; and an enlisted agent the bank struck off had failed the number of times the rule says, with
+ * what it held sent to its sponsor.
+ */
+function bondChecks(calls: Call[], raw: Raw): Check[] {
+  const out: Check[] = [];
+  let bps: bigint | undefined, maxFails = 0, reveals = 0, settled = 0, badLock: Call | undefined, badBack: Call | undefined;
+  const open = new Map<string, bigint>(), winner = new Map<number, string>(), fails = new Map<string, number>();
+  const sponsor = new Map(eventsOf(calls, 'enlist').map((e) => [e.data.agent as string, e.data.sponsor as string]));
+  const customer = (lot: number) => raw.jobs.find((j) => j.id === raw.lots.find((l) => l.id === lot)?.job)?.customer;
+  const paid = (c: Call, to: string, amt: string) => c.transfers.some((t) => t.to === to && t.amount === BigInt(amt)) || c.events.some((x) => x.event === 'credit' && x.data.agent === to && x.data.amount === amt);
+  for (const c of calls) for (const e of c.events) {
+    if (e.event === 'rules' && e.data.bond_bps !== undefined) { bps = BigInt(e.data.bond_bps); maxFails = Number(e.data.crew_max_fails); }
+    if (e.event === 'fail' && 'Team' in e.data.seller) fails.set(e.data.seller.Team, (fails.get(e.data.seller.Team) ?? 0) + 1);
+    if (bps === undefined) continue;
+    const lot = Number(e.data.lot), key = `${lot}:${e.data.agent}`;
+    if (e.event === 'reveal') {
+      reveals++;
+      const want = (BigInt(e.data.price) * bps) / 10_000n, b = c.events.find((x) => x.event === 'bond' && x.data.agent === e.data.agent && Number(x.data.lot) === lot);
+      if (want > 0n ? !b || BigInt(b.data.amount) !== want : !!b) badLock ??= c;
+    }
+    if (e.event === 'bond') open.set(key, BigInt(e.data.amount));
+    if (e.event === 'award') winner.set(lot, sellerOf(e.data.winner));
+    if (e.event === 'bond_back') {
+      const when = e.data.why === 'lost' ? winner.get(lot) !== e.data.agent && c.events.some((x) => x.event === 'award' && Number(x.data.lot) === lot)
+        : e.data.why === 'passed' && c.events.some((x) => x.event === 'pass' && Number(x.data.lot) === lot && sellerOf(x.data.winner) === e.data.agent);
+      if (open.get(key) !== BigInt(e.data.amount) || !when) badBack ??= c;
+      open.delete(key); settled++;
+    }
+    if (e.event === 'slash') {
+      const to = customer(lot), had = open.get(key);
+      const ok = had === BigInt(e.data.amount) && e.data.to === to && c.events.some((x) => x.event === 'fail' && Number(x.data.lot) === lot) && paid(c, to!, String(e.data.amount));
+      out.push({ ok, what: `Lot ${lot} bond slashed`, detail: ok ? `${e.data.agent}'s work failed inspection, so its ${units(e.data.amount)} bond went to the customer ${to}` : `the ${units(e.data.amount)} bond taken from ${e.data.agent} does not match what it locked, or did not reach the customer ${to}`, tx: c.tx });
+      open.delete(key); settled++;
+    }
+    if (e.event === 'retire' && e.data.fails !== undefined) {
+      const n = fails.get(e.data.agent) ?? 0, back = c.events.find((x) => x.event === 'cash_out' && x.data.agent === e.data.agent);
+      const ok = n >= maxFails && Number(e.data.fails) === n && (!back || paid(c, sponsor.get(e.data.agent)!, String(back.data.amount)));
+      out.push({ ok, what: `Crew ${String(e.data.agent).split('.')[0]} struck off`, detail: `its work had failed inspection ${n} times (the rule is ${maxFails}); ${back ? `the ${units(back.data.amount)} it held went to its sponsor ${sponsor.get(e.data.agent)}` : 'it held nothing'}`, tx: c.tx });
+    }
+  }
+  if (bps === undefined) return out;
+  out.unshift(
+    { ok: !badLock, what: 'Bonds locked', detail: badLock ? 'a revealed bid locked the wrong bond, or none' : `each of ${reveals} bids revealed since bonds began locked ${Number(bps) / 100}% of its price from the bidder's balance`, tx: badLock?.tx },
+    { ok: !badBack, what: 'Bonds returned', detail: badBack ? 'a bond came back at the wrong time or for the wrong amount' : `${settled} bonds settled, each once: losers' at the award, winners' when their work passed, failed work's to the customer; ${open.size} still on work in progress`, tx: badBack?.tx },
+  );
   return out;
 }
 

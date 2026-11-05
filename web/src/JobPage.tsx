@@ -129,8 +129,10 @@ function Delivery({ o }: { o: Order }) {
 
 /** A board job's document: Markdown shown as plain blocks (headings, lists, paragraphs), never as raw HTML. */
 function Doc({ doc }: { doc: { title: string; markdown: string } }) {
-  const blocks = doc.markdown.replace(/\r/g, '').split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
+  // a heading line that runs straight into text is its own block
+  const blocks = doc.markdown.replace(/\r/g, '').replace(/^(#{1,3}\s+.*)\n(?!\n)/gm, '$1\n\n').split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
   const inline = (t: string) => t.split(/(\*\*[^*]+\*\*)/g).map((x, i) => (x.startsWith('**') && x.endsWith('**') ? <b key={i}>{x.slice(2, -2)}</b> : x));
+  const cells = (l: string) => l.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
   const download = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([doc.markdown], { type: 'text/markdown' })); a.download = `${doc.title.replace(/[^\w]+/g, '-').toLowerCase()}.md`; a.click(); };
   return (
     <div className="doc">
@@ -138,6 +140,10 @@ function Doc({ doc }: { doc: { title: string; markdown: string } }) {
         const h = b.match(/^(#{1,3})\s+(.*)$/);
         if (h && !b.includes('\n')) return h[1].length === 1 ? <h2 key={i}>{h[2]}</h2> : <h3 key={i}>{h[2]}</h3>;
         const lines = b.split('\n');
+        if (lines.length > 1 && lines.every((l) => l.trim().startsWith('|'))) {
+          const rows = lines.filter((l) => !/^\s*\|?[\s:|-]+\|?\s*$/.test(l)).map(cells);
+          return <div key={i} style={{ overflowX: 'auto' }}><table className="leads"><thead><tr>{rows[0].map((c, k) => <th key={k}>{inline(c)}</th>)}</tr></thead><tbody>{rows.slice(1).map((r, k) => <tr key={k}>{r.map((c, n) => <td key={n}>{inline(c)}</td>)}</tr>)}</tbody></table></div>;
+        }
         if (lines.every((l) => /^\s*([-*]|\d+\.)\s+/.test(l))) return <ul key={i}>{lines.map((l, k) => <li key={k}>{inline(l.replace(/^\s*([-*]|\d+\.)\s+/, ''))}</li>)}</ul>;
         return <p key={i}>{lines.map((l, k) => <span key={k}>{k > 0 && <br />}{inline(l.replace(/^#{1,3}\s+/, ''))}</span>)}</p>;
       })}

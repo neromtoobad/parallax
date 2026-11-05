@@ -20,7 +20,7 @@ async function run(job: Job, input: Record<string, string>) {
   job.log('researcher', 'start', 'Reading the brief and gathering what is known');
   let notes = await llmJson<Notes>(job, 'researcher', {
     reason: 'research notes for a board job',
-    system: 'You are the researcher at Parallax, a company of AI agents. A customer posted the brief below. Write research notes for the writer: facts you are confident of (each short, with no invented numbers or sources), what is uncertain or would need checking, and an outline of the piece the brief asks for. If a web search would help, give up to 3 queries. JSON {"facts":[...],"unknowns":[...],"outline":[...],"queries":[...]}.',
+    system: 'You are the researcher at Parallax, a company of AI agents. A customer posted the brief below. Write research notes for the writer: facts you are confident of (each short, with no invented sources), what is uncertain or would need checking, and an outline of the piece the brief asks for. If the brief asks for prices, rates or other figures, give the typical range you know as a fact starting "Estimate:", so the writer can use it as a range to check rather than leave it out. If a web search would help, give up to 3 queries. JSON {"facts":[...],"unknowns":[...],"outline":[...],"queries":[...]}.',
     prompt: brief,
     dry: () => JSON.stringify({ facts: [`The brief asks for: ${input.title}`], unknowns: ['Local figures would need checking'], outline: ['Summary', 'What we found', 'What to do next'], queries: [] }),
     maxTokens: 900,
@@ -34,11 +34,13 @@ async function run(job: Job, input: Record<string, string>) {
   job.log('writer', 'start', 'Writing it up');
   const doc = await llmJson<Doc>(job, 'writer', {
     reason: 'the document for a board job',
-    system: 'You are the writer at Parallax, a company of AI agents. Write the piece the customer\'s brief asks for, from the research notes, in Markdown: a title, short sections with headings, plain words, at most about 900 words. Use only facts from the notes or the brief; where something is uncertain, say so plainly rather than inventing it. No links unless they are in the notes. JSON {"title","markdown"}.',
+    system: 'You are the writer at Parallax, a company of AI agents. Write the piece the customer\'s brief asks for, from the research notes, in Markdown: short sections with headings, plain words, at most about 900 words, and no longer than the brief asks ("one page" is about 450 words). The title goes in "title" only; the markdown starts with the first section. Use only facts from the notes or the brief. Answer every question the brief asks: where it asks for a price or a figure, give the range from the notes and say plainly that it is an estimate to check locally, rather than leaving it out. No links unless they are in the notes. JSON {"title","markdown"}.',
     prompt: `Brief:\n${brief}\n\nResearch notes:\n${JSON.stringify(notes)}`,
     dry: () => JSON.stringify({ title: input.title, markdown: `# ${input.title}\n\n${notes.outline.map((s) => `## ${s}\n\n(demo) A few lines on ${s.toLowerCase()}.`).join('\n\n')}` }),
     maxTokens: 2400,
   });
+  // a model that puts the title in the markdown too would print it twice
+  doc.markdown = doc.markdown.replace(/^\s*#\s+[^\n]*\n+/, (h) => (h.replace(/^\s*#\s+/, '').trim().toLowerCase() === doc.title.trim().toLowerCase() ? '' : h));
   const words = doc.markdown.split(/\s+/).filter(Boolean).length;
   job.log('writer', 'done', `"${doc.title}", ${words} words`);
 

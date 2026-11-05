@@ -110,7 +110,7 @@ function Member({ a }: { a: Agent }) {
       <div className="t"><b>{a.name}</b><small>{a.title}</small><small className="num">rep {a.rep}</small></div>
     </>
   );
-  return a.url ? <a className="member" href={a.url} target="_blank" style={{ textDecoration: 'none' }}>{inner}</a> : <div className="member">{inner}</div>;
+  return a.url ? <Link className="member" to={`/agent/${a.account}`} style={{ textDecoration: 'none' }}>{inner}</Link> : <div className="member">{inner}</div>;
 }
 
 function LiveJob({ id }: { id: string }) {

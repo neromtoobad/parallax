@@ -123,7 +123,7 @@ async function run(o: Order) {
     let d: Delivery | undefined, err: string | undefined;
     try { d = await svc.run(job, o.input); } catch (e: any) { err = String(e?.message ?? e).slice(0, 200); job.log('cfo', 'error', err); }
     const pass = !!d?.check.pass;
-    o.lots = clean(await closeLots(o.id, lots, job, pass));
+    o.lots = clean(await closeLots(o.id, lots, job, pass, !!d && !pass));
     o.steps = job.steps; o.receipt = job.receipt;
     if (!d || !pass) {
       o.state = 'failed'; o.error = err ?? `The auditor stopped it: ${d!.check.notes.join('; ')}`;

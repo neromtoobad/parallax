@@ -31,12 +31,17 @@
 //!    hash of a brief and the days it may take. The CFO screens the brief (the
 //!    verdict TEE-signed) and takes it, so its parts go to auction like any job,
 //!    or declines it and the money goes back. Untaken posts can be withdrawn.
+//! 6. **Bonds.** A sealed bid is backed by the bidder's own money: revealing it
+//!    locks a fifth of the price from its balance. Losers get theirs back at the
+//!    award and the winner when its work passes. Work that fails inspection pays
+//!    the bond to the customer, and an enlisted agent that fails three times is
+//!    taken off the crew.
 //!
 //! RULES.md is the plain-language version.
 
 use near_sdk::json_types::{U128, U64};
 use near_sdk::serde_json::{json, Value};
-use near_sdk::store::{IterableMap, Vector};
+use near_sdk::store::{IterableMap, LookupMap, Vector};
 use near_sdk::{
     env, ext_contract, near, require, AccountId, Gas, NearToken, PanicOnDefault, PromiseError, PromiseOrValue,
 };
@@ -60,6 +65,10 @@ const REP_ENLIST: u16 = 300;
 /// An enlisted agent's first parts are weighed as if its record were at least REP_START, so a newcomer can win
 /// work to earn a record with. It ends after NEWCOMER_WINS passed parts, or at its first failed inspection.
 const NEWCOMER_WINS: u32 = 3;
+/// Revealing a bid locks this share of its price from the bidder's balance, as a bond on its work.
+const BOND_BPS: u128 = 2_000;
+/// An enlisted agent whose work fails inspection this many times is taken off the crew.
+const CREW_MAX_FAILS: u32 = 3;
 /// A job on the board pays 1 to 25 USDC, takes 1 to 14 days, and waits at most a day to be taken.
 const POST_MIN: u128 = 1_000_000;
 const POST_MAX: u128 = 25_000_000;
@@ -387,6 +396,20 @@ pub struct Parallax {
     crew: IterableMap<AccountId, Crew>,
 }
 
+/// The bond a revealed price locks.
+fn bond_for(price: u128) -> u128 {
+    price * BOND_BPS / BPS
+}
+
+/// Bonds live under their own prefix, outside the contract's root state, so adding them needed no migration.
+fn bonds() -> LookupMap<String, u128> {
+    LookupMap::new(b"Z".to_vec())
+}
+
+fn bond_key(lot: u64, agent: &AccountId) -> String {
+    format!("{}:{}", lot, agent)
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
@@ -450,6 +473,7 @@ impl Parallax {
         check_policy(&policy);
         emit("policy", json!({"by": owner, "policy": policy}));
         emit("rules", json!({"newcomer_wins": NEWCOMER_WINS}));
+        emit("rules", json!({"bond_bps": U128(BOND_BPS), "crew_max_fails": CREW_MAX_FAILS}));
         Self {
             owner,
             cfo,
@@ -793,6 +817,19 @@ impl Parallax {
         emit("rules", json!({"newcomer_wins": NEWCOMER_WINS}));
     }
 
+    /// Called by the bank itself in the transaction that deploys bonds, so the history shows from which block
+    /// a revealed bid must carry one (a fresh bank says so in `new`).
+    #[private]
+    pub fn mark_bonds(&mut self) {
+        emit("rules", json!({"bond_bps": U128(BOND_BPS), "crew_max_fails": CREW_MAX_FAILS}));
+    }
+
+    /// What an agent has locked as bonds on these lots.
+    pub fn bonds_of(&self, agent: AccountId, lots: Vec<u64>) -> Vec<(u64, U128)> {
+        let b = bonds();
+        lots.into_iter().filter_map(|l| b.get(&bond_key(l, &agent)).map(|v| (l, U128(*v)))).collect()
+    }
+
     /// The account that signs for enlisted agents. Enlisted agents are named <slug>.<operator>.
     pub fn set_operator(&mut self, operator: AccountId) {
         self.only_owner();
@@ -1052,9 +1089,18 @@ impl Parallax {
         require!(c.hash == commit_hash(lot, &me, price.0, &salt), "reveal does not match commit");
         require!(price.0 <= l.reserve.0, "bid above reserve");
         require!(l.reveals.iter().all(|r| r.agent != me), "already revealed");
+        let bond = bond_for(price.0);
+        let free = self.balances.get(&me).copied().unwrap_or(0);
+        require!(free >= bond, "balance can't cover the bond");
         l.reveals.push(Reveal { agent: me.clone(), price });
         self.lots.replace(lot as u32, l);
         emit("reveal", json!({"lot": U64(lot), "agent": me, "price": price}));
+        if bond > 0 {
+            // still the agent's money, so it stays in `held`; it just can't be spent until the bond comes back
+            self.balances.insert(me.clone(), free - bond);
+            bonds().insert(bond_key(lot, &me), bond);
+            emit("bond", json!({"lot": U64(lot), "agent": me, "amount": U128(bond)}));
+        }
     }
 
     /// The CFO enters an Agent Market agent's posted price as a bid.
@@ -1124,8 +1170,12 @@ impl Parallax {
         l.winner = Some(winner.clone());
         l.bid = U128(price);
         l.pay = U128(pay);
+        let losers: Vec<AccountId> = l.reveals.iter().map(|r| r.agent.clone()).filter(|a| Some(Seller::Team(a.clone())) != l.winner).collect();
         self.lots.replace(lot as u32, l);
         emit("award", json!({"lot": U64(lot), "winner": winner, "bid": U128(price), "pay": U128(pay), "bidders": bids.len()}));
+        for a in losers {
+            self.bond_back(lot, &a, "lost");
+        }
     }
 
     /// A void lot can go back up for another round.
@@ -1188,14 +1238,20 @@ impl Parallax {
             }
             l.status = LotStatus::Passed;
             emit("pass", json!({"lot": U64(lot), "winner": winner, "pay": l.pay, "note": note}));
+            if let Seller::Team(a) = &winner {
+                self.bond_back(lot, a, "passed");
+            }
         } else {
             match &winner {
                 Seller::Team(a) => {
                     let mut ag = self.agent(a);
                     ag.fails += 1;
                     ag.rep = ag.rep.saturating_sub(REP_FAIL);
+                    let fails = ag.fails;
                     self.agents.insert(a.clone(), ag);
                     l.excluded.push(a.to_string());
+                    self.slash(lot, a, &l.job);
+                    self.strike(a, fails);
                 }
                 Seller::Outside(h) => l.excluded.push(format!("outside:{}", h)),
             }
@@ -1508,6 +1564,41 @@ impl Parallax {
         require!(b >= amount, "balance too low");
         self.balances.insert(from.clone(), b - amount);
         self.held -= amount;
+    }
+
+    /// An agent's bond on a lot goes back to its balance (bids revealed before bonds began have none).
+    fn bond_back(&mut self, lot: u64, agent: &AccountId, why: &str) {
+        let Some(bond) = bonds().remove(&bond_key(lot, agent)) else { return };
+        let b = self.balances.get(agent).copied().unwrap_or(0) + bond;
+        self.balances.insert(agent.clone(), b);
+        emit("bond_back", json!({"lot": U64(lot), "agent": agent, "amount": U128(bond), "why": why, "balance": U128(b)}));
+    }
+
+    /// Failed work: the winner's bond goes to the job's customer.
+    fn slash(&mut self, lot: u64, agent: &AccountId, job: &str) {
+        let Some(bond) = bonds().remove(&bond_key(lot, agent)) else { return };
+        self.held -= bond;
+        let to = self.job(job).customer;
+        emit("slash", json!({"lot": U64(lot), "agent": agent, "amount": U128(bond), "to": to}));
+        self.send_to(&to, bond, "bond for failed work");
+    }
+
+    /// An enlisted agent whose work has failed CREW_MAX_FAILS times comes off the crew, and what it holds goes to
+    /// its sponsor. A bond still out on another lot comes back to its balance later, for the sponsor to take.
+    fn strike(&mut self, agent: &AccountId, fails: u32) {
+        let Some(mut c) = self.crew.get(agent).cloned() else { return };
+        if fails < CREW_MAX_FAILS || c.state != CrewState::Active {
+            return;
+        }
+        let mut a = self.agent(agent);
+        a.active = false;
+        self.agents.insert(agent.clone(), a);
+        c.state = CrewState::Retired;
+        c.note = format!("struck off after {} failed inspections", fails);
+        let sponsor = c.sponsor.clone();
+        self.crew.insert(agent.clone(), c);
+        emit("retire", json!({"agent": agent, "by": env::current_account_id(), "fails": fails}));
+        self.return_balance(agent, &sponsor, "struck off");
     }
 
     /// Fund an open job with `amount` (at least its price). Returns the price taken, or None if refused.

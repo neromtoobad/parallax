@@ -47,7 +47,7 @@ COMPUTE=compute.$ROOT
 HOUSE=house.$ROOT
 CREW=crew.$ROOT
 AGENTS=("${ROLES[@]/%/.$TEAM}" "${SECOND_ROLES[@]/%/-2.$TEAM}")
-# NEAR each new account starts with: the bank's covers its code (~445 KB, 4.45 NEAR) and state. A signer must also
+# NEAR each new account starts with: the bank's covers its code (~455 KB, 4.55 NEAR) and state. A signer must also
 # hold its call's whole prepaid gas up front (~0.001 NEAR per Tgas, mostly refunded): agents bid at 12 Tgas, the CFO
 # calls at 30, the house wallet pays at 80 and accepts at 150. Mainnet starts lean; teardown.sh gets most of it back.
 # The crew operator signs every enlisted agent's bids (12 Tgas), deliveries and bills (40).

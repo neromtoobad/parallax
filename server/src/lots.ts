@@ -29,6 +29,7 @@ export type LotRecord = {
   status: 'bidding' | 'awarded' | 'passed' | 'void' | 'failed'; tx?: string; round?: number;
   quotes?: { handle: string; price: number; quality: number; entered: boolean; why: string }[]; // from the Agent Market
   hire?: { handle: string; taskId: string; usd: number; receipt: string; textHash: string }; // an outside winner, hired
+  slashed?: number; // the winner's bond, paid to the customer when its work failed (rule 36)
 };
 
 // Which roles' work a winner takes over in a job, by order id (job.ts reads it when a service creates the job).
@@ -40,6 +41,9 @@ export const agentName = (account: string) => account.split('.')[0];
 // Demo mode's team: one agent per role, plus a second for the roles that have one on testnet.
 const DEMO_SECONDS: Role[] = ['researcher', 'writer', 'illustrator', 'auditor'];
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** What revealing a bid locks from the bidder's balance until its work passes (the bank's BOND_BPS). */
+export const BOND_SHARE = 0.2;
+const bondFor = (price: number) => r6(price * BOND_SHARE);
 const say = (orderId: string, data: Record<string, unknown>) => publish({ type: 'lot', orderId, data });
 
 /** The lots for a job, by the service's team and what each role has spent on its past jobs. */
@@ -167,8 +171,8 @@ async function commits(orderId: string, l: Open, team: Member[]) {
     const price = own ? (own <= l.reserve ? own : undefined) : bidFor(who, l.cost, rep, l.reserve);
     const agent = agentName(who);
     if (price === undefined) { say(orderId, { phase: 'pass', lot: l.id, agent, role, why: 'its cost is above the reserve' }); return; }
-    // a winner pays its own model bill, so an agent that can't cover it doesn't bid
-    if (!DRY && (await balanceOf(who).catch(() => 0)) < l.cost) { say(orderId, { phase: 'pass', lot: l.id, agent, role, why: "can't cover the model bill yet" }); return; }
+    // a winner pays its own model bill, and revealing locks a bond (rule 36), so an agent that can't cover both doesn't bid
+    if (!DRY && (await balanceOf(who).catch(() => 0)) < l.cost + bondFor(price)) { say(orderId, { phase: 'pass', lot: l.id, agent, role, why: "can't cover the model bill and its bond yet" }); return; }
     const salt = randomBytes(8).toString('hex');
     try {
       if (!DRY) await act(who, 'commit', { lot: l.id, hash: sha256(`${l.id}:${who}:${toUnits(price)}:${salt}`) }, { tgas: 12 });
@@ -194,7 +198,7 @@ async function revealAndAward(orderId: string, l: Open, committing: Promise<void
     try {
       if (!DRY) await act(who, 'reveal', { lot: l.id, price: toUnits(b.price), salt: b.salt }, { tgas: 12 });
       l.bids.push({ agent: who, role, price: b.price });
-      say(orderId, { phase: 'reveal', lot: l.id, agent, role, price: b.price });
+      say(orderId, { phase: 'reveal', lot: l.id, agent, role, price: b.price, bond: bondFor(b.price) });
     } catch (e: any) {
       say(orderId, { phase: 'pass', lot: l.id, agent, role, why: `reveal failed: ${String(e?.message ?? e).slice(0, 60)}` });
     }
@@ -241,11 +245,14 @@ async function untilChain(t: number) {
  * After delivery: each winner files the hash of its part (its steps and calls in the job), and the CFO
  * inspects it. The bank won't take the job's delivery while a lot is still open, so this runs first.
  */
-export async function closeLots(orderId: string, lots: LotRecord[], job: Job | any, pass: boolean): Promise<LotRecord[]> {
+export async function closeLots(orderId: string, lots: LotRecord[], job: Job | any, jobPassed: boolean, caught = false): Promise<LotRecord[]> {
   for (const l of lots.filter((x) => x.status === 'awarded')) {
     const mine = (x: { agent: string }) => l.roles.includes(x.agent as Role) || x.agent === l.winnerRole;
     const part = l.hire?.textHash ?? sha256(JSON.stringify({ steps: (job?.steps ?? []).filter(mine), receipt: (job?.receipt ?? []).filter(mine) }));
-    const note = pass ? `${l.title}: delivered in a job the customer received` : `${l.title}: the job failed`;
+    // when the auditor stops a job, the check was done right: only the parts that made the work fail (and lose their bonds)
+    const checker = caught && l.roles.includes('auditor');
+    const pass = jobPassed || checker;
+    const note = jobPassed ? `${l.title}: delivered in a job the customer received` : checker ? `${l.title}: caught the problem that stopped the job` : `${l.title}: the job failed`;
     try {
       if (!DRY) {
         if (String(l.winner).startsWith('outside:')) await call(NEAR!.cfo, NEAR!.bank, 'deliver_outside', { lot: l.id, deliverable: part, receipt: l.hire?.receipt ?? '' });
@@ -254,10 +261,13 @@ export async function closeLots(orderId: string, lots: LotRecord[], job: Job | a
           const tee = ((job?.receipt ?? []) as ReceiptLine[]).filter((r) => mine(r) && r.tee).slice(-12).map((r) => ({ text: r.tee!.text, signature: r.tee!.signature }));
           await act(l.winner!, 'deliver', { lot: l.id, deliverable: part, tee }, { tgas: 20 + 4 * tee.length });
         }
-        l.tx = (await call(NEAR!.cfo, NEAR!.bank, 'inspect', { lot: l.id, pass, note })).hash;
+        const r = await call(NEAR!.cfo, NEAR!.bank, 'inspect', { lot: l.id, pass, note });
+        l.tx = r.hash;
+        const slash = events(r.logs, 'slash')[0]?.data;
+        if (slash) l.slashed = fromUnits(slash.amount);
       }
       l.status = pass ? 'passed' : 'failed';
-      say(orderId, { phase: pass ? 'pass-inspection' : 'fail-inspection', lot: l.id, title: l.title, winner: agentName(l.winner!.replace('outside:', '')), pay: l.pay, tx: l.tx });
+      say(orderId, { phase: pass ? 'pass-inspection' : 'fail-inspection', lot: l.id, title: l.title, winner: agentName(l.winner!.replace('outside:', '')), pay: l.pay, slashed: l.slashed, tx: l.tx });
     } catch (e: any) {
       say(orderId, { phase: 'error', lot: l.id, why: String(e?.message ?? e).slice(0, 120) });
     }

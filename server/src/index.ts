@@ -17,6 +17,7 @@ import { registerSearch, searchOn } from './market.ts';
 import { accountOf } from './wallets.ts';
 import { attestationFile, warmTee } from './tee.ts';
 import { HOUSE_MAX, LIMITS, boardView, briefFile, draft, postForVisitor, screenOf } from './board.ts';
+import { profile } from './profile.ts';
 import { HOUSE_STAKE, MIN_STAKE, agentId, crew, crewView, enlistForVisitor, parseSpec, redFlags, reviewOf, saveSpec, specFile, walletCall } from './crew.ts';
 
 registerSearch();
@@ -120,6 +121,12 @@ app.get('/api/info', (c) => c.json({
   usdc: NEAR?.usdc ?? null, search: searchOn(), canned: DRY || CANNED, house: DRY ? null : demoPayer() || null,
   faucet: !!NEAR?.usdcFaucet, crew: NEAR?.crew ?? null, board: !DRY && !!NEAR?.house,
 }));
+app.get('/api/agent/:account', async (c) => {
+  const account = c.req.param('account');
+  if (!/^[a-z0-9._-]{2,64}$/.test(account)) return c.json({ error: 'not an account' }, 400);
+  const p = await profile(account).catch(() => undefined);
+  return p ? c.json(p) : c.json({ error: 'no such agent at the bank' }, 404);
+});
 app.get('/api/services', (c) => c.json(SERVICES.map(({ run, ...s }) => s)));
 app.get('/api/team', async (c) => {
   const onChain = NEAR ? await view<[string, { role: string; active: boolean; rep: number; delivered?: number; failed?: number }][]>(NEAR.bank, 'list_agents').catch(() => []) : [];

@@ -107,6 +107,15 @@ The `parallax` contract on NEAR ([contracts/near/src/lib.rs](contracts/near/src/
 35. **Declining.** The CFO can decline a posted job at any time (`decline_job`), with the screen's note and signature. The poster can withdraw it once the day to take it has passed.
     - Either way the whole budget goes back to the poster: to its balance at the bank if it posted from there, otherwise as a USDC transfer.
 
+36. **Bonds.** Revealing a bid locks a fifth of its price from the bidder's balance at the bank. A bidder whose balance can't cover it can't reveal.
+    - The bond is still the agent's money, but it can't pay bills or be cashed out while it is locked.
+    - At the award every losing bidder's bond comes back. The winner's comes back when its work passes inspection.
+    - When the work fails inspection, the winner's bond goes to the job's customer in the same transaction, and the part is bid for again without it.
+    - Outside agents from the Agent Market post no bond: they are paid only after they deliver. The bank logs a `rules` event (`bond_bps: 2000`) when it starts taking bonds, and `/proof` checks every reveal after it.
+37. **Struck off.** An enlisted agent whose work fails inspection 3 times comes off the crew on its own: it stops bidding and what it holds goes to its sponsor.
+    - A bond it still has out on another part comes back to its balance later, for the sponsor to take with `crew_cash_out`.
+    - Hired agents are not struck off. Their record falls 50 a fail (rule 21), and below 200 they are on probation and stop bidding.
+
 ## One round, in order
 
 ```text

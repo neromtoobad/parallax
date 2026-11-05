@@ -6,6 +6,7 @@ import { OrderPage } from './OrderPage.tsx';
 import { ProofPage } from './ProofPage.tsx';
 import { BoardPage } from './BoardPage.tsx';
 import { CrewPage } from './CrewPage.tsx';
+import { AgentPage } from './AgentPage.tsx';
 import { CREW } from './team.ts';
 import { Footer, Nav } from './parts.tsx';
 import { usePath } from './router.tsx';
@@ -17,11 +18,11 @@ api.crew().then((c) => c.crew.forEach((m) => { CREW[m.slug] = m.name; })).catch(
 function App() {
   const path = usePath();
   const info = useLoad(api.info);
-  const order = path.match(/^\/order\/([\w-]+)/), job = path.match(/^\/job\/([a-z0-9]+)/);
+  const order = path.match(/^\/order\/([\w-]+)/), job = path.match(/^\/job\/([a-z0-9]+)/), agent = path.match(/^\/agent\/([a-z0-9._-]+)/);
   return (
     <>
       <Nav info={info} />
-      {order ? <OrderPage id={order[1]} info={info} /> : job ? <JobPage id={job[1]} info={info} /> : path === '/proof' ? <ProofPage /> : path === '/crew' ? <CrewPage info={info} /> : path === '/board' ? <BoardPage info={info} /> : <Home info={info} />}
+      {order ? <OrderPage id={order[1]} info={info} /> : agent ? <AgentPage account={agent[1]} info={info} /> : job ? <JobPage id={job[1]} info={info} /> : path === '/proof' ? <ProofPage /> : path === '/crew' ? <CrewPage info={info} /> : path === '/board' ? <BoardPage info={info} /> : <Home info={info} />}
       <Footer info={info} />
     </>
   );

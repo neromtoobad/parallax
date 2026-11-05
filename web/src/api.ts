@@ -3,6 +3,12 @@ import { useEffect, useState } from 'react';
 
 export type Field = { key: string; label: string; hint?: string; long?: boolean; optional?: boolean };
 export type Service = { id: string; name: string; blurb: string; priceUsd: number; team: string[]; fields: Field[]; example: Record<string, string> };
+export type AgentProfile = {
+  account: string; name: string; role: string; title?: string; about?: string; look?: string; active: boolean;
+  crew?: { sponsor: string; state: string; note: string; joined: number };
+  rep: number; wins: number; fails: number; earned: number; balance: number; bonded: number;
+  lots: { id: number; job: string; title: string; round: number; status: string; won: boolean; failed: boolean; bid?: number; pay?: number; bond?: number }[];
+};
 export type Agent = { id: string; role: string; name: string; title: string; look: string; about: string; account: string; url: string | null; rep: number; active: boolean };
 export type Lot = {
   id: number; title: string; roles: string[]; reserve: number; status: string; tx?: string; round?: number;
@@ -61,6 +67,7 @@ export const api = {
   board: () => req<{ houseMax: number; limits: BoardLimits; jobs: BoardJob[] }>('/api/board'),
   draftPost: (p: { title: string; brief: string; budget: number; days: number }) => req<{ id: string; hash: string; flags: string[]; wallet: WalletCall; budget: number }>('/api/board/draft', p),
   housePost: (id: string) => req<{ tx: string; id: string }>('/api/board/post', { id }),
+  agent: (account: string) => req<AgentProfile>(`/api/agent/${account}`),
   crew: () => req<{ operator: string | null; houseStake: number; minStake: number; crew: CrewMember[] }>('/api/crew'),
   saveSpec: (spec: Partial<CrewSpec>, stake: number) => req<{ hash: string; agent: string; flags: string[]; wallet: WalletCall; stake: number }>(`/api/crew/spec?stake=${stake}`, spec),
   enlist: (hash: string) => req<{ tx: string; agent: string }>('/api/crew/enlist', { hash }),
