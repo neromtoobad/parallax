@@ -9,7 +9,6 @@ import { DATA_DIR, DRY } from './config.ts';
 import { publish } from './bus.ts';
 import { Job } from './job.ts';
 import { assignmentFor, auction, closeLots, type LotRecord } from './lots.ts';
-import { nameOf } from './wallets.ts';
 import { NEARAI_HOST } from './nearai.ts';
 import { NEAR, balanceOf, call, isAccountId, sha256, toUnits, txUrl, view } from './near/chain.ts';
 import { priceFor, recordSpend } from './cfo/treasury.ts';
@@ -120,24 +119,24 @@ export function startBoardJob(p: { id: string; title: string; brief: string; tex
  * A sub-job an agent just put on the bank for its part (subjobs.ts): already funded from the agent's balance,
  * so it starts at the auction.
  */
-export function startSubJob(p: { id: string; parent: string; lot: number; by: string; input: Record<string, string>; text: string; amount: number; tx: string }) {
+export function startSubJob(p: { id: string; parent: string; lot: number; by: string; name: string; input: Record<string, string>; text: string; amount: number; tx: string }) {
   const now = new Date().toISOString();
   const o: Order = {
     id: p.id, service: 'factcheck', input: p.input, brief: p.text, priceUsd: p.amount, customer: p.by, state: 'funded',
     createdAt: now, updatedAt: now, txs: [], lots: [], steps: [], receipt: [], parent: { id: p.parent, lot: p.lot, by: p.by },
   };
-  tx(o, `Posted by ${nameOf(p.by)} for its part of job ${p.parent}, paid from its own balance`, p.tx);
+  tx(o, `Posted by ${p.name} for its part of job ${p.parent}, paid from its own balance`, p.tx);
   save(o);
   void run(o);
   return o;
 }
 
 /** Records a sub-job on the job it was hired for. */
-export function noteSub(parentId: string, s: NonNullable<Order['subs']>[number]) {
+export function noteSub(parentId: string, s: NonNullable<Order['subs']>[number], name: string) {
   const o = getOrder(parentId);
   if (!o) return;
   o.subs = [...(o.subs ?? []), s];
-  tx(o, `${nameOf(s.by)} hired a ${s.title.toLowerCase()} for ${s.amount} USDC from its own balance`, s.tx);
+  tx(o, `${name} hired a ${s.title.toLowerCase()} for ${s.amount} USDC from its own balance`, s.tx);
   save(o);
 }
 

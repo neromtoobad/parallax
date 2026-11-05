@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto';
 import { DRY } from './config.ts';
 import type { Job } from './job.ts';
 import { nameOf } from './wallets.ts';
+import { crewSpec } from './crew.ts';
 import { NEAR, act, balanceOf, canSign, sha256, toUnits } from './near/chain.ts';
 import { r6 } from './auction.ts';
 import { getOrder, markAccepted, noteSub, startSubJob } from './orders.ts';
@@ -21,7 +22,7 @@ export async function hireFactCheck(job: Job, p: { title: string; brief: string;
   if (DRY || !NEAR) return undefined;
   const lot = getOrder(job.orderId)?.lots.find((l) => l.status === 'awarded' && l.roles.includes('writer'));
   if (!lot?.winner || lot.winner.startsWith('outside:') || !lot.pay || !canSign(lot.winner)) return undefined;
-  const who = lot.winner, name = nameOf(who), amount = r6(Math.min(lot.pay, Math.max(0.005, lot.pay * SHARE)));
+  const who = lot.winner, name = crewSpec(who)?.name ?? nameOf(who), amount = r6(Math.min(lot.pay, Math.max(0.005, lot.pay * SHARE)));
   if (amount > lot.pay || (await balanceOf(who).catch(() => 0)) < amount) {
     job.log('writer', 'note', `${name} can't cover a fact check from its balance, so it writes on without one`);
     return undefined;
@@ -31,8 +32,8 @@ export async function hireFactCheck(job: Job, p: { title: string; brief: string;
   savePost({ id, hash, title: `Fact check: ${p.title}`.slice(0, 100), brief: `${name} hired a check of its draft for job ${job.orderId}.`, days: 1, budgetUsd: amount, at: new Date().toISOString(), parent: job.orderId, by: who }, text);
   job.log('writer', 'start', `${name} hires a fact check of its draft for ${amount} USDC, from its own balance`);
   const r = await act(who, 'sub_post', { lot: lot.id, id, spec: hash, amount: toUnits(amount) }, { tgas: 30 });
-  noteSub(job.orderId, { id, title: 'Fact check', by: who, amount, tx: r.hash });
-  startSubJob({ id, parent: job.orderId, lot: lot.id, by: who, input, text, amount, tx: r.hash });
+  noteSub(job.orderId, { id, title: 'Fact check', by: who, amount, tx: r.hash }, name);
+  startSubJob({ id, parent: job.orderId, lot: lot.id, by: who, name, input, text, amount, tx: r.hash });
 
   const done = await finished(id);
   if (done?.state !== 'delivered' || !done.delivery?.factcheck) {
