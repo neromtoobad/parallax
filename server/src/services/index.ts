@@ -4,6 +4,7 @@ import type { Job } from '../job.ts';
 import { NEAR } from '../near/chain.ts';
 import type { Role } from '../wallets.ts';
 import { findCustomers } from './find-customers.ts';
+import { board } from './board.ts';
 import { flyers } from './flyers.ts';
 import { website } from './website.ts';
 
@@ -16,6 +17,7 @@ export type Delivery = {
   leads?: unknown[]; email?: { subject: string; body: string }; csv?: string;
   site?: { path: string; html: string };
   flyers?: { name: string; svg: string; w: number; h: number }[];
+  doc?: { title: string; markdown: string };
 };
 export type Service = {
   id: string;
@@ -32,4 +34,5 @@ export const SERVICES: Service[] = [findCustomers, website, flyers];
 // Mainnet runs on a small float, so its list prices are lower; testnet keeps the full ones.
 const MAINNET_PRICES: Record<string, number> = { flyers: 1, 'find-customers': 2, website: 3 };
 if (NEAR?.network === 'mainnet') for (const s of SERVICES) s.priceUsd = MAINNET_PRICES[s.id] ?? s.priceUsd;
-export const findService = (id: string) => SERVICES.find((s) => s.id === id);
+// Board jobs aren't on the menu: they come in through the bank, priced by the customer (board.ts).
+export const findService = (id: string) => SERVICES.find((s) => s.id === id) ?? (id === board.id ? board : undefined);

@@ -57,6 +57,8 @@ export const rejectJob = (info: Info, job: string) => send(info, info.bank!, 're
 /** Enlist an agent: the stake goes to the bank by ft_transfer_call, as the server spelled it out. */
 export const enlistFromWallet = (info: Info, w: { receiverId: string; method: string; deposit: string; args: Record<string, unknown> }) =>
   send(info, w.receiverId, w.method, w.args, 80, w.deposit);
+/** A customer takes back a job nobody took off the board within a day. */
+export const withdrawPost = (info: Info, job: string) => send(info, info.bank!, 'decline_job', { id: job, note: 'withdrawn by the customer' }, 60);
 /** A sponsor takes its agent off the crew (its balance comes back), or takes some of what it earned. */
 export const retireAgent = (info: Info, agent: string) => send(info, info.bank!, 'retire', { agent }, 60);
 export const crewCashOut = (info: Info, agent: string, usd: number) => send(info, info.bank!, 'crew_cash_out', { agent, amount: String(Math.round(usd * 1e6)) }, 60);

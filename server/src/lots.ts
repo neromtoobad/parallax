@@ -90,14 +90,14 @@ export async function auction(orderId: string, service: string, priceUsd: number
   // 2. Outside quotes from the Agent Market for the research, while the team seals its bids.
   const team = await members();
   const research = lots.find((l) => l.title === 'Research');
-  await Promise.all([
-    research && brief ? outsideQuotes(orderId, research, findService(service)?.name ?? service) : undefined, // searched by service, not the brief
-    ...lots.map((l) => commits(orderId, l, team)),
-  ]);
-
-  // 3–4. Reveals and the award.
+  // 3–4. Each lot runs on its own clock: its reveals start when its commit window closes, whatever the other
+  // lots are doing, so one slow transaction can't push a whole job's reveals past their window.
   const map: Partial<Record<Role, Winner>> = {};
-  await revealAndAward(orderId, lots, team, map);
+  await Promise.all(lots.map(async (l) => {
+    const quotes = l === research && brief ? outsideQuotes(orderId, l, findService(service)?.name ?? service) : undefined; // searched by service, not the brief
+    await revealAndAward(orderId, l, commits(orderId, l, team), team, map);
+    await quotes;
+  }));
 
   // 5. An outside winner is hired. If it can't deliver, the lot fails and the team bids for it again.
   for (const l of lots.filter((x) => x.status === 'awarded' && x.winner?.startsWith('outside:'))) {
@@ -122,8 +122,7 @@ export async function auction(orderId: string, service: string, priceUsd: number
       } else { l.commitEnd = Date.now() / 1000 + policy.commit_secs; l.revealEnd = l.commitEnd + policy.reveal_secs; }
       Object.assign(l, { bids: [], salts: new Map(), outside: [], winner: undefined, winnerRole: undefined, bid: undefined, pay: undefined, status: 'bidding' as const, round: (l.round ?? 1) + 1 });
       say(orderId, { phase: 'open', lot: l.id, title: l.title, roles: l.roles, reserve: l.reserve, round: l.round });
-      await commits(orderId, l, team);
-      await revealAndAward(orderId, [l], team, map);
+      await revealAndAward(orderId, l, commits(orderId, l, team), team, map);
     }
   }
   assigned.set(orderId, map);
@@ -181,11 +180,16 @@ async function commits(orderId: string, l: Open, team: Member[]) {
   }));
 }
 
-/** Reveals once the commit window has closed on chain, then the bank's award once reveals close. */
-async function revealAndAward(orderId: string, lots: Open[], team: Member[], map: Partial<Record<Role, Winner>>) {
+/**
+ * A lot's reveals once its commit window has closed on chain, then the bank's award once its reveals close.
+ * A commit still waiting on a slow node gets until shortly before the reveals close to land; one that
+ * landed on time is revealed, and one that didn't has already been refused by the bank.
+ */
+async function revealAndAward(orderId: string, l: Open, committing: Promise<void>, team: Member[], map: Partial<Record<Role, Winner>>) {
   const byAccount = new Map(team.map((m) => [m.account, m]));
-  await untilChain(Math.max(...lots.map((l) => l.commitEnd)) + 1);
-  await Promise.all(lots.flatMap((l) => [...l.salts].map(async ([who, b]) => {
+  await untilChain(l.commitEnd + 1);
+  await Promise.race([committing, sleep(Math.max(0, (l.revealEnd - l.commitEnd - 15) * 1000))]);
+  await Promise.all([...l.salts].map(async ([who, b]) => {
     const role = byAccount.get(who)!.role, agent = agentName(who);
     try {
       if (!DRY) await act(who, 'reveal', { lot: l.id, price: toUnits(b.price), salt: b.salt }, { tgas: 12 });
@@ -194,28 +198,26 @@ async function revealAndAward(orderId: string, lots: Open[], team: Member[], map
     } catch (e: any) {
       say(orderId, { phase: 'pass', lot: l.id, agent, role, why: `reveal failed: ${String(e?.message ?? e).slice(0, 60)}` });
     }
-  })));
+  }));
 
-  await untilChain(Math.max(...lots.map((l) => l.revealEnd)) + 1);
-  for (const l of lots) {
-    let winner: string | undefined, bid = 0, pay = 0;
-    if (DRY) [winner, bid, pay] = demoAward(l, byAccount);
-    else {
-      const r = await call(NEAR!.cfo, NEAR!.bank, 'award', { lot: l.id });
-      const ev = events(r.logs, 'award')[0]?.data;
-      l.tx = r.hash;
-      if (ev) {
-        const w = ev.winner;
-        winner = w.Team ?? `outside:${w.Outside}`;
-        bid = fromUnits(ev.bid); pay = fromUnits(ev.pay);
-      }
+  await untilChain(l.revealEnd + 1);
+  let winner: string | undefined, bid = 0, pay = 0;
+  if (DRY) [winner, bid, pay] = demoAward(l, byAccount);
+  else {
+    const r = await call(NEAR!.cfo, NEAR!.bank, 'award', { lot: l.id });
+    const ev = events(r.logs, 'award')[0]?.data;
+    l.tx = r.hash;
+    if (ev) {
+      const w = ev.winner;
+      winner = w.Team ?? `outside:${w.Outside}`;
+      bid = fromUnits(ev.bid); pay = fromUnits(ev.pay);
     }
-    if (!winner) { l.status = 'void'; say(orderId, { phase: 'void', lot: l.id, title: l.title }); continue; }
-    const won = byAccount.get(winner);
-    Object.assign(l, { winner, winnerRole: won?.role, bid, pay, status: 'awarded' as const });
-    if (won) for (const r of l.roles) map[r] = { role: won.role, account: won.account };
-    say(orderId, { phase: 'award', lot: l.id, title: l.title, winner: won ? agentName(winner) : winner.replace('outside:', ''), role: won?.role ?? 'outside', bid, pay, bidders: l.bids.length + l.outside.length, tx: l.tx });
   }
+  if (!winner) { l.status = 'void'; say(orderId, { phase: 'void', lot: l.id, title: l.title }); return; }
+  const won = byAccount.get(winner);
+  Object.assign(l, { winner, winnerRole: won?.role, bid, pay, status: 'awarded' as const });
+  if (won) for (const r of l.roles) map[r] = { role: won.role, account: won.account };
+  say(orderId, { phase: 'award', lot: l.id, title: l.title, winner: won ? agentName(winner) : winner.replace('outside:', ''), role: won?.role ?? 'outside', bid, pay, bidders: l.bids.length + l.outside.length, tx: l.tx });
 }
 
 /** The bank's award, in memory (auction.ts). */

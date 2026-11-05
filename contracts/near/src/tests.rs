@@ -1071,3 +1071,136 @@ fn rule_32_hired_agents_get_no_allowance() {
     let lot = nia_against_writer(&mut s, 300_000, 290_000);
     assert_eq!(s.get_lot(lot).unwrap().winner, Some(Seller::Team(acc(NIA))));
 }
+
+// ---------------------------------------------------------------- the board
+
+fn post_msg(id: &str, days: u32) -> String {
+    format!("post:{{\"id\":\"{}\",\"spec\":\"{}\",\"days\":{}}}", id, SPEC, days)
+}
+
+/// ada.testnet puts a 3 USDC job on the board from her wallet.
+fn posted() -> Parallax {
+    let mut s = setup();
+    assert_eq!(deposit(&mut s, "ada.testnet", 3 * D, &post_msg("bb01", 2)), 0);
+    s
+}
+
+#[test]
+fn rule_33_anyone_can_put_a_job_on_the_board() {
+    let s = posted();
+    let j = s.get_job("bb01".into()).unwrap();
+    assert_eq!(j.state, JobState::Posted);
+    assert_eq!(j.customer, acc("ada.testnet"));
+    assert_eq!(j.amount.0, 3 * D);
+    assert_eq!(j.spec_hash, SPEC);
+    assert_eq!(s.overview().escrowed.0, 3 * D);
+    assert_eq!(s.list_posted().len(), 1);
+    assert!(get_logs().iter().any(|l| l.contains("\"posted\"") && l.contains(SPEC)));
+}
+
+#[test]
+#[should_panic(expected = "a job on the board pays 1 to 25 USDC")]
+fn rule_33_a_post_pays_at_least_one_usdc() {
+    let mut s = setup();
+    deposit(&mut s, "ada.testnet", D / 2, &post_msg("bb01", 2));
+}
+
+#[test]
+#[should_panic(expected = "1 to 14 days to deliver")]
+fn rule_33_a_post_gives_one_to_fourteen_days() {
+    let mut s = setup();
+    deposit(&mut s, "ada.testnet", 2 * D, &post_msg("bb01", 30));
+}
+
+#[test]
+fn rule_33_the_house_posts_from_its_balance() {
+    let mut s = setup();
+    topped(&mut s, "writer.testnet", 2 * D);
+    at("writer.testnet", 5);
+    s.post_job("bb02".into(), SPEC.into(), 1, U128(2 * D));
+    assert_eq!(s.balance_of(acc("writer.testnet")).0, 0);
+    assert_eq!(s.get_job("bb02".into()).unwrap().state, JobState::Posted);
+}
+
+#[test]
+fn rule_34_a_taken_job_is_auctioned_and_paid_like_any_job() {
+    let mut s = posted();
+    at("cfo.testnet", 10);
+    s.approve_signer(TEE_ADDR.into(), TEE_MODEL.into(), REPORT.into());
+    s.take_job("bb01".into(), "a clear research brief".into(), sig());
+    assert_eq!(s.get_job("bb01".into()).unwrap().state, JobState::Funded);
+    assert!(s.list_posted().is_empty());
+    assert!(get_logs().iter().any(|l| l.contains("\"taken\"") && l.contains(TEE_ADDR)));
+    let lot = s.open_lot("bb01".into(), "Writing".into(), vec!["writer".into()], U128(D));
+    bid(&mut s, lot, "writer.testnet", 400_000, 11);
+    reveal(&mut s, lot, "writer.testnet", 400_000, 31);
+    at("anyone.testnet", 51);
+    s.award(lot);
+    at("writer.testnet", 60);
+    s.deliver(lot, "report".into(), sig());
+    at("cfo.testnet", 70);
+    s.inspect(lot, true, "good".into());
+    s.submit_job("bb01".into(), "files".into());
+    at("ada.testnet", 80);
+    s.accept("bb01".into());
+    assert_eq!(s.balance_of(acc("writer.testnet")).0, D); // alone on the lot: paid its reserve
+    assert_eq!(s.overview().escrowed.0, 0);
+}
+
+#[test]
+#[should_panic(expected = "only the CFO")]
+fn rule_34_only_the_cfo_takes_a_job() {
+    let mut s = posted();
+    at("ada.testnet", 10);
+    s.take_job("bb01".into(), "mine".into(), None);
+}
+
+#[test]
+#[should_panic(expected = "taking a job needs its screen's TEE signature")]
+fn rule_34_with_require_tee_taking_needs_the_screens_signature() {
+    let mut s = posted();
+    at("boss.testnet", 5);
+    let mut p = s.get_policy();
+    p.require_tee = true;
+    s.set_policy(p);
+    at("cfo.testnet", 10);
+    s.take_job("bb01".into(), "ok".into(), None);
+}
+
+#[test]
+#[should_panic(expected = "the post has expired")]
+fn rule_34_an_expired_post_cannot_be_taken() {
+    let mut s = posted();
+    at("cfo.testnet", 86_401);
+    s.take_job("bb01".into(), "late".into(), None);
+}
+
+#[test]
+fn rule_35_a_declined_job_goes_back_to_its_customer() {
+    let mut s = setup();
+    topped(&mut s, "writer.testnet", 2 * D);
+    at("writer.testnet", 5);
+    s.post_job("bb02".into(), SPEC.into(), 1, U128(2 * D));
+    at("cfo.testnet", 10);
+    s.decline_job("bb02".into(), "asks for something we can't do".into(), None);
+    assert_eq!(s.get_job("bb02".into()).unwrap().state, JobState::Refunded);
+    assert_eq!(s.balance_of(acc("writer.testnet")).0, 2 * D);
+    assert_eq!(s.overview().escrowed.0, 0);
+}
+
+#[test]
+#[should_panic(expected = "only the CFO, or the customer once the post has expired")]
+fn rule_35_the_customer_waits_a_day_before_withdrawing() {
+    let mut s = posted();
+    at("ada.testnet", 3_600);
+    s.decline_job("bb01".into(), "changed my mind".into(), None);
+}
+
+#[test]
+fn rule_35_an_untaken_post_can_be_withdrawn() {
+    let mut s = posted();
+    at("ada.testnet", 86_401);
+    s.decline_job("bb01".into(), "nobody took it".into(), None);
+    assert_eq!(s.get_job("bb01".into()).unwrap().state, JobState::Refunded);
+    assert_eq!(s.overview().escrowed.0, 0);
+}

@@ -27,6 +27,10 @@
 //!    pays its first model bills. It bids only after the CFO's AI review passes
 //!    it (the review itself TEE-signed). The crew operator signs for enlisted
 //!    agents; their sponsor keeps what they earn and can retire them any time.
+//! 5. **The board.** Anyone can put a job on chain: USDC into escrow with the
+//!    hash of a brief and the days it may take. The CFO screens the brief (the
+//!    verdict TEE-signed) and takes it, so its parts go to auction like any job,
+//!    or declines it and the money goes back. Untaken posts can be withdrawn.
 //!
 //! RULES.md is the plain-language version.
 
@@ -56,6 +60,10 @@ const REP_ENLIST: u16 = 300;
 /// An enlisted agent's first parts are weighed as if its record were at least REP_START, so a newcomer can win
 /// work to earn a record with. It ends after NEWCOMER_WINS passed parts, or at its first failed inspection.
 const NEWCOMER_WINS: u32 = 3;
+/// A job on the board pays 1 to 25 USDC, takes 1 to 14 days, and waits at most a day to be taken.
+const POST_MIN: u128 = 1_000_000;
+const POST_MAX: u128 = 25_000_000;
+const POST_TAKE_SECS: u64 = 86_400;
 /// The least an enlisted agent can start with, in USDC units (0.10 USDC).
 const MIN_STAKE: u128 = 100_000;
 /// Enlisted agents under review or active at once, in all and per sponsor.
@@ -180,6 +188,14 @@ pub struct Crew {
     pub joined: U64,
 }
 
+/// `ft_transfer_call` msg `post:<this as JSON>`: the transfer is the budget, held in escrow.
+#[near(serializers = [json])]
+pub struct PostMsg {
+    pub id: String,
+    pub spec: String,
+    pub days: u32,
+}
+
 /// `ft_transfer_call` msg `enlist:<this as JSON>`: the transfer is the stake.
 #[near(serializers = [json])]
 pub struct EnlistMsg {
@@ -199,6 +215,8 @@ pub enum JobState {
     Rejected,
     Refunded,
     Cancelled,
+    /// Put on the board by a customer, in escrow, waiting for the CFO to take or decline it.
+    Posted,
 }
 
 #[near(serializers = [borsh, json])]
@@ -478,6 +496,11 @@ impl Parallax {
                 None => amount.0,
             }));
         }
+        if let Some(m) = msg.strip_prefix("post:") {
+            let m: PostMsg = near_sdk::serde_json::from_str(m).unwrap_or_else(|_| env::panic_str("post: expects {id, spec, days}"));
+            self.do_post(sender_id, m, amount.0);
+            return PromiseOrValue::Value(U128(0));
+        }
         if let Some(m) = msg.strip_prefix("enlist:") {
             let m: EnlistMsg = near_sdk::serde_json::from_str(m).unwrap_or_else(|_| env::panic_str("enlist: expects {slug, role, name, spec}"));
             self.do_enlist(sender_id, m, amount.0);
@@ -636,6 +659,49 @@ impl Parallax {
         self.debit(&me, amount.0);
         emit("cash_out", json!({"agent": me, "amount": amount}));
         self.pay_out(me, amount.0, "cash_out");
+    }
+
+    // ============================================================ the board
+
+    /// Put a job on the board, paid from the caller's balance at the bank (the house wallet does this
+    /// for visitors without a wallet). From a wallet, send the budget with `ft_transfer_call` and msg
+    /// `post:{"id","spec","days"}` instead.
+    pub fn post_job(&mut self, id: String, spec: String, days: u32, amount: U128) {
+        let me = env::predecessor_account_id();
+        self.debit(&me, amount.0);
+        self.do_post(me, PostMsg { id, spec, days }, amount.0);
+    }
+
+    /// The CFO takes a posted job, with the TEE signature of the screen that passed its brief. It is then
+    /// funded like any job, and its parts go to auction.
+    pub fn take_job(&mut self, id: String, note: String, tee: Option<Vec<TeeSig>>) {
+        self.only_cfo();
+        self.alive();
+        let mut j = self.job(&id);
+        require!(j.state == JobState::Posted, "not on the board");
+        require!(env::block_timestamp() <= j.fund_by.0, "the post has expired");
+        let signed = self.check_tee(tee.unwrap_or_default(), "taking a job needs its screen's TEE signature");
+        j.state = JobState::Funded;
+        let note: String = note.chars().take(280).collect();
+        emit("taken", json!({"job": id, "amount": j.amount, "note": note, "tee": signed}));
+        self.jobs.insert(id, j);
+    }
+
+    /// A posted job goes back to its customer: declined by the CFO (with its screen's signature, if a model
+    /// read it), or withdrawn by the customer once nobody has taken it within a day.
+    pub fn decline_job(&mut self, id: String, note: String, tee: Option<Vec<TeeSig>>) {
+        let me = env::predecessor_account_id();
+        let mut j = self.job(&id);
+        require!(j.state == JobState::Posted, "not on the board");
+        require!(me == self.cfo || (me == j.customer && env::block_timestamp() > j.fund_by.0), "only the CFO, or the customer once the post has expired");
+        let signed = if me == self.cfo { self.check_tee(tee.unwrap_or_default(), "") } else { vec![] };
+        j.state = JobState::Refunded;
+        self.escrowed -= j.amount.0;
+        let note: String = note.chars().take(280).collect();
+        emit("declined", json!({"job": id, "by": me, "refund": j.amount, "note": note, "tee": signed}));
+        let (to, amount) = (j.customer.clone(), j.amount.0);
+        self.jobs.insert(id, j);
+        self.send_to(&to, amount, "declined");
     }
 
     // ============================================================ the open crew
@@ -1205,6 +1271,11 @@ impl Parallax {
         self.jobs.get(&id).cloned()
     }
 
+    /// The jobs on the board waiting to be taken.
+    pub fn list_posted(&self) -> Vec<Job> {
+        self.jobs.values().filter(|j| j.state == JobState::Posted).cloned().collect()
+    }
+
     pub fn get_lot(&self, id: u64) -> Option<Lot> {
         self.lots.get(id as u32).cloned()
     }
@@ -1309,6 +1380,35 @@ impl Parallax {
             signed.push(json!({"signer": who, "text": t.text}));
         }
         signed
+    }
+
+    fn do_post(&mut self, customer: AccountId, m: PostMsg, amount: u128) {
+        self.alive();
+        let id = m.id.as_bytes();
+        require!((4..=40).contains(&id.len()) && id.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-'), "job id: 4 to 40 of a-z, 0-9 and -");
+        require!(self.jobs.get(&m.id).is_none(), "job exists");
+        require!(m.spec.len() == 64 && m.spec.bytes().all(|c| c.is_ascii_hexdigit()), "spec must be a sha256 in hex");
+        require!((POST_MIN..=POST_MAX).contains(&amount), "a job on the board pays 1 to 25 USDC");
+        require!((1..=14).contains(&m.days), "1 to 14 days to deliver");
+        let now = env::block_timestamp();
+        let j = Job {
+            id: m.id.clone(),
+            customer: customer.clone(),
+            amount: U128(amount),
+            bond: U128(0),
+            fund_by: U64(now + POST_TAKE_SECS * NS),
+            deliver_by: U64(now + m.days as u64 * 86_400 * NS),
+            accept_by: U64(0),
+            revised: false,
+            state: JobState::Posted,
+            spec_hash: m.spec.clone(),
+            deliverable_hash: String::new(),
+            lots: vec![],
+            reserved: U128(0),
+        };
+        self.escrowed += amount;
+        self.jobs.insert(m.id.clone(), j);
+        emit("posted", json!({"job": m.id, "customer": customer, "amount": U128(amount), "spec": m.spec, "days": m.days}));
     }
 
     fn do_enlist(&mut self, sponsor: AccountId, m: EnlistMsg, stake: u128) {

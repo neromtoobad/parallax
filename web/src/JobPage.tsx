@@ -7,7 +7,7 @@ import { Link } from './router.tsx';
 import { nameOf } from './team.ts';
 import { acceptJob, rejectJob, useWallet } from './wallet.ts';
 
-const NAMES: Record<string, string> = { 'find-customers': 'Find customers', website: 'Website', flyers: 'Flyers' };
+const NAMES: Record<string, string> = { 'find-customers': 'Find customers', website: 'Website', flyers: 'Flyers', board: 'Board job' };
 const FLOW = ['funded', 'bidding', 'working', 'delivered', 'accepted'] as const;
 const FLOW_LABEL: Record<string, string> = { funded: 'Paid into escrow', bidding: 'Auction', working: 'Work', delivered: 'Delivered', accepted: 'Accepted · paid out' };
 const KIND: Record<string, string> = { start: 'started', done: 'done', note: 'note', search: 'searched', pass: 'passed it', fail: 'failed it', error: 'error', retry: 'retrying', hire: 'hired' };
@@ -121,7 +121,27 @@ function Delivery({ o }: { o: Order }) {
         <iframe className="frame" src={d.site.path} title="The website" />
         <p style={{ marginTop: 12 }}><a className="ghost" href={d.site.path} target="_blank">Open the site ↗</a></p>
       </>}
+      {d.doc && <Doc doc={d.doc} />}
       {d.flyers && <div className="flyers">{d.flyers.slice().reverse().map((f) => <Flyer key={f.name} f={f} />)}</div>}
+    </div>
+  );
+}
+
+/** A board job's document: Markdown shown as plain blocks (headings, lists, paragraphs), never as raw HTML. */
+function Doc({ doc }: { doc: { title: string; markdown: string } }) {
+  const blocks = doc.markdown.replace(/\r/g, '').split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
+  const inline = (t: string) => t.split(/(\*\*[^*]+\*\*)/g).map((x, i) => (x.startsWith('**') && x.endsWith('**') ? <b key={i}>{x.slice(2, -2)}</b> : x));
+  const download = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([doc.markdown], { type: 'text/markdown' })); a.download = `${doc.title.replace(/[^\w]+/g, '-').toLowerCase()}.md`; a.click(); };
+  return (
+    <div className="doc">
+      {blocks.map((b, i) => {
+        const h = b.match(/^(#{1,3})\s+(.*)$/);
+        if (h && !b.includes('\n')) return h[1].length === 1 ? <h2 key={i}>{h[2]}</h2> : <h3 key={i}>{h[2]}</h3>;
+        const lines = b.split('\n');
+        if (lines.every((l) => /^\s*([-*]|\d+\.)\s+/.test(l))) return <ul key={i}>{lines.map((l, k) => <li key={k}>{inline(l.replace(/^\s*([-*]|\d+\.)\s+/, ''))}</li>)}</ul>;
+        return <p key={i}>{lines.map((l, k) => <span key={k}>{k > 0 && <br />}{inline(l.replace(/^#{1,3}\s+/, ''))}</span>)}</p>;
+      })}
+      <p style={{ marginTop: 12 }}><button className="ghost" onClick={download}>Download as Markdown</button></p>
     </div>
   );
 }

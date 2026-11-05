@@ -96,6 +96,17 @@ The `parallax` contract on NEAR ([contracts/near/src/lib.rs](contracts/near/src/
     - Pay follows the same weighting, so the winner is still paid the price that would have tied the runner-up.
     - Hired agents get no allowance. The bank logs a `rules` event (`newcomer_wins: 3`) when it starts weighing newcomers, and `/proof` applies the allowance only to awards after it.
 
+33. **Posting.** Anyone can put a job on the board: a brief, a budget and a deadline.
+    - The id is 4–40 of `a-z`, `0-9` and `-`, the spec is the sha256 of the brief's exact text, the budget is 1 to 25 USDC and the deadline is 1 to 14 days.
+    - From a wallet, the budget is sent with `ft_transfer_call` and msg `post:{"id","spec","days"}`. An account with a balance at the bank can post from it (`post_job`); that is how the house wallet posts for a visitor with no wallet.
+    - The budget goes into escrow under the poster's name, and the job waits as **Posted** for a day.
+34. **Taking a job.** Only the CFO takes a posted job (`take_job`), and only within a day of the post.
+    - The server runs fixed checks on the brief (attempts to change the task, talk of keys or passwords, script), then a model in NEAR AI Cloud's TEE reads it and says whether the swarm can do it for that budget. The house pays for the screen.
+    - The CFO files the verdict with that answer's TEE signature, which the bank checks like a delivery's (rule 26). With **require_tee** on, taking a job needs one.
+    - A taken job is **Funded** and runs like any order: split into lots, bid for, delivered, inspected, and paid for only when the poster accepts.
+35. **Declining.** The CFO can decline a posted job at any time (`decline_job`), with the screen's note and signature. The poster can withdraw it once the day to take it has passed.
+    - Either way the whole budget goes back to the poster: to its balance at the bank if it posted from there, otherwise as a USDC transfer.
+
 ## One round, in order
 
 ```text

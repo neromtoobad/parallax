@@ -18,6 +18,7 @@ export const NET = {
   explorer: 'https://testnet.nearblocks.io',
   reports: 'https://useparallax.xyz/api/attestation',
   crew: 'https://useparallax.xyz/api/crew',
+  board: 'https://useparallax.xyz/api/board',
 };
 
 type Seller = { Team: string } | { Outside: string };
@@ -39,6 +40,7 @@ export type Raw = {
   calls: Call[]; lots: ChainLot[]; jobs: ChainJob[]; agents: [string, { rep: number }][];
   signers: [string, SignerRec][]; reports: Record<string, string | null>; policy: { compute?: string; daily_model_cap?: string };
   specs?: Record<string, string | null>; reviews?: Record<string, any | null>;
+  briefs?: Record<string, string | null>; screens?: Record<string, any | null>;
 };
 
 export type Check = { ok: boolean; what: string; detail: string; tx?: string };
@@ -142,7 +144,13 @@ export async function load(say: (s: string) => void = () => {}): Promise<Raw> {
   if (enlisted.length) say('Fetching the enlisted agents\' specs and reviews');
   for (const e of enlisted) specs[e.data.spec] = await fetch(`${NET.crew}/spec/${e.data.spec}`).then((r) => (r.ok ? r.text() : null)).catch(() => null);
   for (const e of reviewed) reviews[e.data.agent] = await fetch(`${NET.crew}/review/${e.data.agent}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-  return { calls, lots, jobs, agents, signers, reports, policy, specs, reviews };
+  // The board: each posted brief by its hash, and each screen's exact request and answer.
+  const briefs: Raw['briefs'] = {}, screens: Raw['screens'] = {};
+  const posts = eventsOf(calls, 'posted'), screened = [...eventsOf(calls, 'taken'), ...eventsOf(calls, 'declined')];
+  if (posts.length) say('Fetching the board\'s briefs and screens');
+  for (const e of posts) briefs[e.data.spec] = await fetch(`${NET.board}/brief/${e.data.spec}`).then((r) => (r.ok ? r.text() : null)).catch(() => null);
+  for (const e of screened) if (e.data.tee?.length) screens[e.data.job] = await fetch(`${NET.board}/screen/${e.data.job}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  return { calls, lots, jobs, agents, signers, reports, policy, specs, reviews, briefs, screens };
 }
 
 /** The attestation report checks for one approved signer: the bank's hash, the key it names, and the TDX quote's binding. */
@@ -320,7 +328,8 @@ export async function verify(raw: Raw, tamper = false): Promise<Proof> {
     const { job } = jp;
     const amount = BigInt(job.amount);
     const of = (name: string) => eventsOf(calls, name).filter((e) => e.data.job === job.id);
-    const funded = of('funded')[0];
+    const funded = of('funded')[0], posted = of('posted')[0];
+    if (posted) jp.checks.push({ ok: BigInt(posted.data.amount) === amount, what: 'Escrow', detail: `${posted.data.customer} put ${posted.data.amount} into escrow when it posted the job on the board, and the job is priced at ${job.amount}`, tx: posted.call.tx });
     if (funded) jp.checks.push({ ok: BigInt(funded.data.amount) === amount, what: 'Escrow', detail: `${funded.data.payer} paid ${funded.data.amount} into escrow for a job priced at ${job.amount}`, tx: funded.call.tx });
     const acc = of('accepted')[0], ref = of('refund')[0];
     if (acc) {
@@ -383,6 +392,8 @@ export async function verify(raw: Raw, tamper = false): Promise<Proof> {
   for (const [a, sg] of raw.signers) checks.push(...(await reportChecks(a, sg, raw.reports[a])));
   // 7. The open crew: specs, and reviews whose signed request and answer we can read.
   checks.push(...(await crewChecks(calls, raw, approved)));
+  // 8. The board: briefs, and screens whose signed request and answer we can read.
+  checks.push(...(await boardChecks(calls, raw, approved)));
   const all = [...checks, ...jobs.flatMap((j) => [...j.rounds.flatMap((r) => r.checks), ...j.checks])];
   return { jobs, checks, total: all.length, passed: all.filter((c) => c.ok).length, txs: raw.calls.length };
 }
@@ -424,6 +435,47 @@ async function crewChecks(calls: Call[], raw: Raw, approved: Map<string, SignerR
       const sponsor = enlisted.get(agent)?.data.sponsor, back = r.call.events.find((e) => e.event === 'cash_out' && e.data.to === sponsor);
       const moved = back && (r.call.transfers.some((t) => t.to === sponsor && t.amount === BigInt(back.data.amount)) || r.call.events.some((e) => e.event === 'credit' && e.data.agent === sponsor && e.data.amount === back.data.amount));
       out.push({ ok: !!moved, what: `${who} stake back`, detail: moved ? `${units(back!.data.amount)} went back to its sponsor ${sponsor}` : `no stake went back to ${sponsor}`, tx: r.call.tx });
+    }
+  }
+  return out;
+}
+
+/**
+ * For each job on the board: the brief the server serves hashes to what the bank holds. For each screen the CFO
+ * filed: the model answer behind it was signed by an approved TEE signer, the published request and answer hash to
+ * what was signed, the request holds the whole brief, and the answer's pass is what the CFO did (take or decline).
+ * A declined job's money went back to its customer.
+ */
+async function boardChecks(calls: Call[], raw: Raw, approved: Map<string, SignerRec>): Promise<Check[]> {
+  const out: Check[] = [];
+  const posts = new Map(eventsOf(calls, 'posted').map((e) => [e.data.job as string, e]));
+  for (const [id, e] of posts) {
+    const who = `Board ${id}`, text = raw.briefs?.[e.data.spec];
+    if (text == null) { out.push({ ok: false, what: `${who} brief`, detail: `no brief ${e.data.spec.slice(0, 12)}… could be fetched from ${NET.board}`, tx: e.call.tx }); continue; }
+    const h = await sha256(text);
+    out.push({ ok: h === e.data.spec, what: `${who} brief`, detail: `sha256 of the served brief is ${h.slice(0, 16)}…, ${h === e.data.spec ? 'the same as' : 'not'} the hash posted with ${units(e.data.amount)} by ${e.data.customer}`, tx: e.call.tx });
+  }
+  const screened = [...eventsOf(calls, 'taken').map((e) => [e, true] as const), ...eventsOf(calls, 'declined').map((e) => [e, false] as const)];
+  for (const [e, took] of screened) {
+    const id: string = e.data.job, who = `Board ${id}`, post = posts.get(id), sigs: { text: string; signature: string }[] = e.call.args.tee ?? [];
+    if (!took && e.data.by === post?.data.customer) out.push({ ok: true, what: `${who} withdrawn`, detail: `nobody took it within a day, so ${e.data.by} took it back`, tx: e.call.tx });
+    else if (sigs.length) {
+      const t = sigs[0], signer = signerOf(t.text, t.signature), sg = signer ? approved.get(signer) : undefined;
+      const [, reqH, ansH] = t.text.slice((sg?.model.length ?? 0)).split(':');
+      out.push({ ok: !!sg && t.text.startsWith(`${sg.model}:`), what: `${who} screen signed`, detail: sg ? `the screen's model answer was signed inside NEAR AI Cloud's TEE by ${signer}, approved for ${sg.model}` : 'the screen signature does not recover to an approved signer', tx: e.call.tx });
+      const rec = raw.screens?.[id], text = post && raw.briefs?.[post.data.spec];
+      if (!rec?.request || !rec?.answer) { out.push({ ok: false, what: `${who} screen bytes`, detail: `no screen record at ${NET.board}/screen/${id}`, tx: e.call.tx }); continue; }
+      const [rq, an] = [await sha256(rec.request), await sha256(rec.answer)];
+      let read = false, said: boolean | undefined;
+      try { read = !!text && JSON.parse(rec.request).messages.some((m: any) => String(m.content).includes(text)); } catch { /* bad bytes */ }
+      try { said = JSON.parse(String(JSON.parse(rec.answer).choices[0].message.content).match(/\{[\s\S]*\}/)![0]).pass === true; } catch { /* bad bytes */ }
+      out.push({ ok: rq === reqH && an === ansH, what: `${who} screen bytes`, detail: `sha256 of the published request is ${rq.slice(0, 12)}… and of the answer ${an.slice(0, 12)}…; the signed text has ${reqH?.slice(0, 12)}… and ${ansH?.slice(0, 12)}…`, tx: e.call.tx });
+      out.push({ ok: read && said === took, what: `${who} verdict`, detail: `the request ${read ? 'holds the whole brief' : 'does not hold the brief'}, and the model answered ${said === undefined ? 'nothing readable' : said ? 'pass' : 'fail'}; the CFO ${took ? 'took' : 'declined'} it: "${e.data.note}"`, tx: e.call.tx });
+    } else out.push({ ok: !took, what: `${who} screen`, detail: took ? 'taken with no TEE-signed model answer' : `declined before any model call: "${e.data.note}"`, tx: e.call.tx });
+    if (!took) {
+      const to = post?.data.customer, amt = String(e.data.refund);
+      const moved = !!to && (e.call.transfers.some((t) => t.to === to && t.amount === BigInt(amt)) || e.call.events.some((x) => x.event === 'credit' && x.data.agent === to && x.data.amount === amt));
+      out.push({ ok: moved, what: `${who} money back`, detail: moved ? `${units(amt)} went back to ${to}` : `no refund to ${to} in that transaction`, tx: e.call.tx });
     }
   }
   return out;

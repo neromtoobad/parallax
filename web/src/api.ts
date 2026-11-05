@@ -20,14 +20,19 @@ export type Order = {
   delivery?: {
     summary: string; check: { pass: boolean; notes: string[] };
     leads?: Lead[]; email?: { subject: string; body: string }; csv?: string;
-    site?: { path: string }; flyers?: { name: string; svg: string; w: number; h: number }[];
+    site?: { path: string }; flyers?: { name: string; svg: string; w: number; h: number }[]; doc?: { title: string; markdown: string };
   };
   error?: string;
 };
 export type Info = {
   mode: string; model: string; bank: string | null; explorer: string | null; usdc: string | null; search: boolean;
-  canned: boolean; house: string | null; faucet: boolean; crew: string | null;
+  canned: boolean; house: string | null; faucet: boolean; crew: string | null; board?: boolean;
 };
+export type BoardJob = {
+  id: string; title: string; brief: string; hash: string; days: number; budgetUsd: number; at: string;
+  state: string; customer?: string; order?: string; screen?: { pass: boolean; note: string; tx: string; signer?: string };
+};
+export type BoardLimits = { minUsd: number; maxUsd: number; minDays: number; maxDays: number; title: number; brief: number };
 export type CrewSpec = { slug: string; name: string; role: string; playbook: string; knowledge: string; markup: number; search: boolean; style: string };
 export type CrewMember = {
   agent: string; slug: string; name: string; sponsor: string; state: 'Review' | 'Active' | 'Rejected' | 'Retired'; note: string; joined: number;
@@ -53,6 +58,9 @@ export const api = {
   pay: (id: string, wallet: 'demo' | 'own' = 'demo') => req<Order>(`/api/orders/${id}/pay`, { wallet }),
   accept: (id: string, tx?: string) => req<Order>(`/api/orders/${id}/accept`, { tx }),
   reject: (id: string, tx?: string) => req<Order>(`/api/orders/${id}/reject`, { tx }),
+  board: () => req<{ houseMax: number; limits: BoardLimits; jobs: BoardJob[] }>('/api/board'),
+  draftPost: (p: { title: string; brief: string; budget: number; days: number }) => req<{ id: string; hash: string; flags: string[]; wallet: WalletCall; budget: number }>('/api/board/draft', p),
+  housePost: (id: string) => req<{ tx: string; id: string }>('/api/board/post', { id }),
   crew: () => req<{ operator: string | null; houseStake: number; minStake: number; crew: CrewMember[] }>('/api/crew'),
   saveSpec: (spec: Partial<CrewSpec>, stake: number) => req<{ hash: string; agent: string; flags: string[]; wallet: WalletCall; stake: number }>(`/api/crew/spec?stake=${stake}`, spec),
   enlist: (hash: string) => req<{ tx: string; agent: string }>('/api/crew/enlist', { hash }),

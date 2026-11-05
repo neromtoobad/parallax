@@ -16,6 +16,7 @@ import { NEAR, accountUrl, view } from './near/chain.ts';
 import { registerSearch, searchOn } from './market.ts';
 import { accountOf } from './wallets.ts';
 import { attestationFile, warmTee } from './tee.ts';
+import { HOUSE_MAX, LIMITS, boardView, briefFile, draft, postForVisitor, screenOf } from './board.ts';
 import { HOUSE_STAKE, MIN_STAKE, agentId, crew, crewView, enlistForVisitor, parseSpec, redFlags, reviewOf, saveSpec, specFile, walletCall } from './crew.ts';
 
 registerSearch();
@@ -25,6 +26,12 @@ void warmTee();
 if (!DRY && NEAR?.crew) {
   const tick = () => import('./crew.ts').then((m) => m.reviewPending()).catch((e) => console.log('crew:', String(e?.message ?? e).slice(0, 120)));
   void crew(true).catch(() => {}).then(tick);
+  setInterval(tick, 30_000).unref();
+}
+// The board: screen every post waiting on the bank, then take it to auction or send its money back.
+if (!DRY && NEAR?.house) {
+  const tick = () => import('./board.ts').then((m) => m.screenPosted()).catch((e) => console.log('board:', String(e?.message ?? e).slice(0, 120)));
+  setTimeout(tick, 5_000).unref();
   setInterval(tick, 30_000).unref();
 }
 const app = new Hono();
@@ -39,6 +46,37 @@ app.get('/api/attestation/:hash', (c) => {
   return c.body(raw, 200, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=86400' });
 });
 // The open crew (RULES.md 28–31).
+app.get('/api/board', async (c) => c.json({ houseMax: HOUSE_MAX, limits: LIMITS, jobs: DRY ? [] : await boardView() }));
+// A brief's exact text, under the sha256 the bank holds.
+app.get('/api/board/brief/:hash', (c) => {
+  const t = briefFile(c.req.param('hash'));
+  return t === undefined ? c.json({ error: 'no brief with that hash' }, 404) : c.body(t, 200, { 'content-type': 'text/plain; charset=utf-8', 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=86400' });
+});
+// A screen with the exact request and answer its TEE signature is over.
+app.get('/api/board/screen/:id', (c) => {
+  const r = screenOf(c.req.param('id'));
+  return r ? c.json(r, 200, { 'access-control-allow-origin': '*' }) : c.json({ error: 'not screened yet' }, 404);
+});
+app.post('/api/board/draft', async (c) => {
+  if (DRY || !NEAR?.house) return c.json({ error: 'the board runs on chain only' }, 400);
+  const d = draft(await c.req.json().catch(() => ({})));
+  if (!d.post) return c.json({ error: d.problems.join('; ') }, 400);
+  return c.json({ id: d.post.id, hash: d.post.hash, flags: d.flags, wallet: d.wallet, budget: d.post.budgetUsd });
+});
+// No wallet: the house wallet posts a visitor's job from its balance, a few a day.
+const posted = { day: '', total: 0, byIp: new Map<string, number>() };
+app.post('/api/board/post', async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  const day = new Date().toISOString().slice(0, 10);
+  if (posted.day !== day) Object.assign(posted, { day, total: 0, byIp: new Map() });
+  const ip = (c.req.header('x-forwarded-for') ?? '').split(',')[0].trim() || 'local';
+  if (posted.total >= 6 || (posted.byIp.get(ip) ?? 0) >= 2) return c.json({ error: 'The house has posted all the jobs it can today. Post from your own wallet, or try tomorrow.' }, 429);
+  try {
+    const tx = await postForVisitor(String(b.id ?? ''));
+    posted.total++; posted.byIp.set(ip, (posted.byIp.get(ip) ?? 0) + 1);
+    return c.json({ tx, id: b.id });
+  } catch (e: any) { return c.json({ error: String(e?.message ?? e).slice(0, 200) }, 400); }
+});
 app.get('/api/crew', async (c) => c.json({ operator: NEAR?.crew ?? null, houseStake: HOUSE_STAKE, minStake: MIN_STAKE, crew: await crewView() }));
 app.get('/api/crew/spec/:hash', (c) => {
   const raw = specFile(c.req.param('hash'));
@@ -80,7 +118,7 @@ app.post('/api/crew/enlist', async (c) => {
 app.get('/api/info', (c) => c.json({
   mode: DRY ? 'demo' : NEAR?.network, model: MODEL, bank: NEAR?.bank ?? null, explorer: NEAR?.explorer ?? null,
   usdc: NEAR?.usdc ?? null, search: searchOn(), canned: DRY || CANNED, house: DRY ? null : demoPayer() || null,
-  faucet: !!NEAR?.usdcFaucet, crew: NEAR?.crew ?? null,
+  faucet: !!NEAR?.usdcFaucet, crew: NEAR?.crew ?? null, board: !DRY && !!NEAR?.house,
 }));
 app.get('/api/services', (c) => c.json(SERVICES.map(({ run, ...s }) => s)));
 app.get('/api/team', async (c) => {

@@ -142,6 +142,8 @@ table.leads td b{font-size:15px}
 .mail{background:var(--paper);border-radius:14px;padding:18px;white-space:pre-wrap;font-size:15px}
 .frame{width:100%;height:640px;border:1px solid var(--line);border-radius:16px;background:#fff}
 .flyers{display:grid;grid-template-columns:1fr 1.2fr;gap:18px;align-items:start}
+.doc{max-width:720px;background:#fff;border:1px solid var(--line);border-radius:18px;padding:28px 32px;line-height:1.6}
+.doc h2{font-size:26px;margin:0 0 14px}.doc h3{font-size:18px;margin:22px 0 8px}.doc p,.doc ul{margin:0 0 12px}.doc ul{padding-left:20px}
 .flyers img{width:100%;border-radius:12px;box-shadow:var(--shadow);display:block;background:#fff}
 .note{color:var(--muted);font-size:14px}
 .acc{display:flex;align-items:center;justify-content:space-between;gap:20px;background:var(--ink);color:#fff;border-radius:var(--r);padding:22px 26px;margin:20px 0}

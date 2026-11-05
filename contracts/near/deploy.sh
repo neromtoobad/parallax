@@ -47,15 +47,15 @@ COMPUTE=compute.$ROOT
 HOUSE=house.$ROOT
 CREW=crew.$ROOT
 AGENTS=("${ROLES[@]/%/.$TEAM}" "${SECOND_ROLES[@]/%/-2.$TEAM}")
-# NEAR each new account starts with: the bank's covers its code (~380 KB, 3.8 NEAR) and state. A signer must also
+# NEAR each new account starts with: the bank's covers its code (~445 KB, 4.45 NEAR) and state. A signer must also
 # hold its call's whole prepaid gas up front (~0.001 NEAR per Tgas, mostly refunded): agents bid at 12 Tgas, the CFO
 # calls at 30, the house wallet pays at 80 and accepts at 150. Mainnet starts lean; teardown.sh gets most of it back.
 # The crew operator signs every enlisted agent's bids (12 Tgas), deliveries and bills (40).
 # Override with FUND_BANK, FUND_CFO, FUND_SMALL, FUND_AGENT, FUND_HOUSE, FUND_CREW and FUND_USDC (testnet root from the faucet has 10 NEAR).
 if [ "$NET" = mainnet ]; then
-  FUND_BANK=${FUND_BANK:-4.6} FUND_CFO=${FUND_CFO:-0.1} FUND_SMALL=${FUND_SMALL:-0.01} FUND_AGENT=${FUND_AGENT:-0.03} FUND_HOUSE=${FUND_HOUSE:-0.18} FUND_CREW=${FUND_CREW:-0.06}
+  FUND_BANK=${FUND_BANK:-4.8} FUND_CFO=${FUND_CFO:-0.1} FUND_SMALL=${FUND_SMALL:-0.01} FUND_AGENT=${FUND_AGENT:-0.03} FUND_HOUSE=${FUND_HOUSE:-0.18} FUND_CREW=${FUND_CREW:-0.06}
 else
-  FUND_BANK=${FUND_BANK:-4.9} FUND_CFO=${FUND_CFO:-0.5} FUND_SMALL=${FUND_SMALL:-0.1} FUND_AGENT=${FUND_AGENT:-0.15} FUND_HOUSE=${FUND_HOUSE:-0.25} FUND_CREW=${FUND_CREW:-0.3}
+  FUND_BANK=${FUND_BANK:-5.1} FUND_CFO=${FUND_CFO:-0.5} FUND_SMALL=${FUND_SMALL:-0.1} FUND_AGENT=${FUND_AGENT:-0.15} FUND_HOUSE=${FUND_HOUSE:-0.25} FUND_CREW=${FUND_CREW:-0.3}
 fi
 # team.$ROOT pays for the agents it creates, so it starts with their NEAR, ~0.008 a creation for gas, plus its own
 FUND_TEAM=$(python3 -c "print(round(${#AGENTS[@]}*($FUND_AGENT+0.008)+0.02,3))")

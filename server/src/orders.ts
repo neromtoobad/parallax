@@ -94,6 +94,23 @@ export async function fund(o: Order, withDemoWallet: boolean) {
   return o;
 }
 
+/**
+ * A board job the CFO has just taken (board.ts): the customer's own brief and budget, already in escrow on the
+ * bank, so it starts at the auction.
+ */
+export function startBoardJob(p: { id: string; title: string; brief: string; text: string; budgetUsd: number; customer: string; postTx?: string; takeTx: string }) {
+  const now = new Date().toISOString();
+  const o: Order = {
+    id: p.id, service: 'board', input: { title: p.title, brief: p.brief }, brief: p.text, priceUsd: p.budgetUsd,
+    customer: p.customer, state: 'funded', createdAt: now, updatedAt: now, txs: [], lots: [], steps: [], receipt: [],
+  };
+  if (p.postTx) tx(o, `Posted on the board with ${p.budgetUsd} USDC in escrow`, p.postTx);
+  tx(o, 'Brief screened and taken by the CFO', p.takeTx);
+  save(o);
+  void run(o);
+  return o;
+}
+
 /** Auction, work, inspect, submit. */
 async function run(o: Order) {
   const svc = findService(o.service)!;
