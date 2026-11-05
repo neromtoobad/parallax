@@ -9,6 +9,7 @@ import { DATA_DIR, DRY } from './config.ts';
 import { publish } from './bus.ts';
 import { Job } from './job.ts';
 import { assignmentFor, auction, closeLots, type LotRecord } from './lots.ts';
+import { nameOf } from './wallets.ts';
 import { NEARAI_HOST } from './nearai.ts';
 import { NEAR, balanceOf, call, isAccountId, sha256, toUnits, txUrl, view } from './near/chain.ts';
 import { priceFor, recordSpend } from './cfo/treasury.ts';
@@ -28,6 +29,10 @@ export type Order = {
   error?: string; private?: boolean;
   /** The bank refunded it after the delivery deadline. */
   refunded?: boolean;
+  /** A sub-job: the job and part an agent hired it for, and the agent. */
+  parent?: { id: string; lot: number; by: string };
+  /** The sub-jobs agents hired for this job's parts. */
+  subs?: { id: string; title: string; by: string; amount: number; tx: string }[];
 };
 
 const dir = () => join(DATA_DIR, 'orders');
@@ -109,6 +114,38 @@ export function startBoardJob(p: { id: string; title: string; brief: string; tex
   save(o);
   void run(o);
   return o;
+}
+
+/**
+ * A sub-job an agent just put on the bank for its part (subjobs.ts): already funded from the agent's balance,
+ * so it starts at the auction.
+ */
+export function startSubJob(p: { id: string; parent: string; lot: number; by: string; input: Record<string, string>; text: string; amount: number; tx: string }) {
+  const now = new Date().toISOString();
+  const o: Order = {
+    id: p.id, service: 'factcheck', input: p.input, brief: p.text, priceUsd: p.amount, customer: p.by, state: 'funded',
+    createdAt: now, updatedAt: now, txs: [], lots: [], steps: [], receipt: [], parent: { id: p.parent, lot: p.lot, by: p.by },
+  };
+  tx(o, `Posted by ${nameOf(p.by)} for its part of job ${p.parent}, paid from its own balance`, p.tx);
+  save(o);
+  void run(o);
+  return o;
+}
+
+/** Records a sub-job on the job it was hired for. */
+export function noteSub(parentId: string, s: NonNullable<Order['subs']>[number]) {
+  const o = getOrder(parentId);
+  if (!o) return;
+  o.subs = [...(o.subs ?? []), s];
+  tx(o, `${nameOf(s.by)} hired a ${s.title.toLowerCase()} for ${s.amount} USDC from its own balance`, s.tx);
+  save(o);
+}
+
+/** The agent that hired a sub-job accepted it on the bank. */
+export function markAccepted(o: Order, what: string, hash: string) {
+  tx(o, what, hash);
+  o.state = 'accepted';
+  save(o);
 }
 
 /** Auction, work, inspect, submit. */

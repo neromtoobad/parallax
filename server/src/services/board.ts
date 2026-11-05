@@ -4,6 +4,7 @@
 // the bank (post:), and the CFO takes it only after the brief passes its screen (board.ts).
 import type { Job } from '../job.ts';
 import { canSearch, llmJson, search } from '../tools.ts';
+import { hireFactCheck } from '../subjobs.ts';
 import { audit, briefOf } from './check.ts';
 import type { Field, Service } from './index.ts';
 
@@ -32,7 +33,7 @@ async function run(job: Job, input: Record<string, string>) {
   job.log('researcher', 'done', `${notes.facts.length} facts, ${notes.unknowns.length} open questions, ${notes.outline.length} sections`);
 
   job.log('writer', 'start', 'Writing it up');
-  const doc = await llmJson<Doc>(job, 'writer', {
+  let doc = await llmJson<Doc>(job, 'writer', {
     reason: 'the document for a board job',
     system: 'You are the writer at Parallax, a company of AI agents. Write the piece the customer\'s brief asks for, from the research notes, in Markdown: short sections with headings, plain words, at most about 900 words, and no longer than the brief asks ("one page" is about 450 words). The title goes in "title" only; the markdown starts with the first section. Use only facts from the notes or the brief. Answer every question the brief asks: where it asks for a price or a figure, give the range from the notes and say plainly that it is an estimate to check locally, rather than leaving it out. No links unless they are in the notes. JSON {"title","markdown"}.',
     prompt: `Brief:\n${brief}\n\nResearch notes:\n${JSON.stringify(notes)}`,
@@ -43,6 +44,27 @@ async function run(job: Job, input: Record<string, string>) {
   doc.markdown = doc.markdown.replace(/^\s*#\s+[^\n]*\n+/, (h) => (h.replace(/^\s*#\s+/, '').trim().toLowerCase() === doc.title.trim().toLowerCase() ? '' : h));
   const words = doc.markdown.split(/\s+/).filter(Boolean).length;
   job.log('writer', 'done', `"${doc.title}", ${words} words`);
+
+  // the writer hires another agent to check its draft, pays it from its own balance, and revises from what comes back
+  const fc = await hireFactCheck(job, { title: doc.title, brief, draft: doc.markdown }).catch((e: any) => {
+    job.log('writer', 'note', `No fact check this time: ${String(e?.message ?? e).slice(0, 120)}`);
+    return undefined;
+  });
+  if (fc?.issues.length) {
+    job.log('writer', 'start', `Revising from the fact check (${fc.issues.length} to fix)`);
+    const fixed = await llmJson<Doc>(job, 'writer', {
+      reason: 'revising a board job document from a hired fact check',
+      system: 'You are the writer at Parallax. You hired another agent to fact-check your draft. Revise the draft so each issue it found is fixed, and change nothing else. Keep the headings and format. The word limit in the brief still holds: if a fix adds words, cut the same number elsewhere. The title goes in "title" only. JSON {"title","markdown"}.',
+      prompt: `Brief:\n${brief}\n\nYour draft, "${doc.title}":\n${doc.markdown}\n\nThe fact check:\n${fc.issues.map((i, n) => `${n + 1}. ${i.claim}: ${i.problem} Fix: ${i.fix}`).join('\n')}`,
+      dry: () => JSON.stringify(doc),
+      maxTokens: 3200,
+    }).catch(() => undefined);
+    if (fixed?.markdown) {
+      fixed.markdown = fixed.markdown.replace(/^\s*#\s+[^\n]*\n+/, (h) => (h.replace(/^\s*#\s+/, '').trim().toLowerCase() === fixed.title.trim().toLowerCase() ? '' : h));
+      doc = fixed;
+      job.log('writer', 'done', `Revised: ${doc.markdown.split(/\s+/).filter(Boolean).length} words`);
+    }
+  }
 
   const check = await audit(job, brief, `# ${doc.title}\n\n${doc.markdown}`);
   return { summary: `${doc.title}: a ${words}-word document written for your brief, from research notes, and checked against it.`, check, doc };

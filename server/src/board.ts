@@ -24,7 +24,7 @@ import { llmJson } from './tools.ts';
 export const HOUSE_MAX = 3;
 export const LIMITS = { minUsd: 1, maxUsd: 25, minDays: 1, maxDays: 14, title: 100, brief: 2000 };
 
-export type Post = { id: string; hash: string; title: string; brief: string; days: number; budgetUsd: number; at: string };
+export type Post = { id: string; hash: string; title: string; brief: string; days: number; budgetUsd: number; at: string; parent?: string; by?: string };
 export type Screen = {
   job: string; pass: boolean; note: string; flags: string[]; model?: string; request?: string; answer?: string;
   tee?: { text: string; signature: string; signer?: string }; bill?: string; tx: string; at: string;
@@ -85,6 +85,13 @@ export function draft(b: any): { post?: Post; problems: string[]; flags: string[
   return { post, problems, flags: briefFlags(text), wallet };
 }
 
+/** A sub-job an agent posts (subjobs.ts) goes on the board too, with its exact text under its hash. */
+export function savePost(post: Post, text: string) {
+  mkdirSync(dir('posts'), { recursive: true });
+  writeFileSync(dir(`${post.hash}.txt`), text);
+  writeFileSync(dir('posts', `${post.id}.json`), JSON.stringify(post, null, 2));
+}
+
 /** No wallet: the house wallet puts a visitor's post on the bank from its balance (small budgets only). */
 export async function postForVisitor(id: string): Promise<string> {
   const p = postOf(id);
@@ -102,7 +109,7 @@ export async function boardView() {
     const j = DRY ? undefined : await view<Posted & { state: string }>(NEAR!.bank, 'get_job', { id: p.id }).catch(() => undefined);
     const o = getOrder(p.id), s = screenOf(p.id);
     return {
-      id: p.id, title: p.title, brief: p.brief, hash: p.hash, days: p.days, budgetUsd: p.budgetUsd, at: p.at,
+      id: p.id, title: p.title, brief: p.brief, hash: p.hash, days: p.days, budgetUsd: p.budgetUsd, at: p.at, parent: p.parent, by: p.by,
       onChain: !!j, state: j?.state ?? 'Draft', customer: j?.customer, order: o?.state,
       screen: s && { pass: s.pass, note: s.note, tx: s.tx, signer: s.tee?.signer },
     };

@@ -8,6 +8,7 @@ export type AgentProfile = {
   crew?: { sponsor: string; state: string; note: string; joined: number };
   rep: number; wins: number; fails: number; earned: number; balance: number; bonded: number;
   lots: { id: number; job: string; title: string; round: number; status: string; won: boolean; failed: boolean; bid?: number; pay?: number; bond?: number }[];
+  hired?: { id: string; parent: string; amount: number; state: string; winner?: string }[];
 };
 export type Agent = { id: string; role: string; name: string; title: string; look: string; about: string; account: string; url: string | null; rep: number; active: boolean };
 export type Lot = {
@@ -27,15 +28,18 @@ export type Order = {
     summary: string; check: { pass: boolean; notes: string[] };
     leads?: Lead[]; email?: { subject: string; body: string }; csv?: string;
     site?: { path: string }; flyers?: { name: string; svg: string; w: number; h: number }[]; doc?: { title: string; markdown: string };
+    factcheck?: { issues: { claim: string; problem: string; fix: string }[]; verdict: string };
   };
   error?: string;
+  parent?: { id: string; lot: number; by: string };
+  subs?: { id: string; title: string; by: string; amount: number; tx: string }[];
 };
 export type Info = {
   mode: string; model: string; bank: string | null; explorer: string | null; usdc: string | null; search: boolean;
   canned: boolean; house: string | null; faucet: boolean; crew: string | null; board?: boolean;
 };
 export type BoardJob = {
-  id: string; title: string; brief: string; hash: string; days: number; budgetUsd: number; at: string;
+  id: string; title: string; brief: string; hash: string; days: number; budgetUsd: number; at: string; parent?: string; by?: string;
   state: string; customer?: string; order?: string; screen?: { pass: boolean; note: string; tx: string; signer?: string };
 };
 export type BoardLimits = { minUsd: number; maxUsd: number; minDays: number; maxDays: number; title: number; brief: number };

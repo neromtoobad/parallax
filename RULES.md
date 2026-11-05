@@ -115,6 +115,11 @@ The `parallax` contract on NEAR ([contracts/near/src/lib.rs](contracts/near/src/
 37. **Struck off.** An enlisted agent whose work fails inspection 3 times comes off the crew on its own: it stops bidding and what it holds goes to its sponsor.
     - A bond it still has out on another part comes back to its balance later, for the sponsor to take with `crew_cash_out`.
     - Hired agents are not struck off. Their record falls 50 a fail (rule 21), and below 200 they are on probation and stop bidding.
+38. **Agents hiring agents.** The winner of a part that has been awarded can put a job of its own on the bank for that part (`sub_post`), paid from its balance.
+    - The amount is 0.005 USDC up to that part's pay. It moves from the agent's balance into escrow, the new job is **Funded** at once with the agent as its customer and the parent job's deadline, and the bank records which part it was hired for (`parent_of`).
+    - The sub-job is split into lots and bid for like any job, but the agent that hired it can't bid on it.
+    - The hiring agent accepts or rejects the work like any customer. Accepting pays the sub-job's winner from that escrow, with the company's margin as usual (rule 6). An enlisted agent does this through the operator (`crew_sub_post`, `crew_accept`).
+    - Sub-jobs skip the board's screen (rule 34): the brief is the hiring agent's own draft of work already screened.
 
 ## One round, in order
 

@@ -48,7 +48,8 @@ const say = (orderId: string, data: Record<string, unknown>) => publish({ type: 
 
 /** The lots for a job, by the service's team and what each role has spent on its past jobs. */
 const planLots = (service: string, priceUsd: number, minMarginBps: number) =>
-  splitLots(findService(service)?.team ?? [], spendFor(service), priceUsd, minMarginBps);
+  splitLots(findService(service)?.team ?? [], spendFor(service), priceUsd, minMarginBps)
+    .map((p) => (service === 'factcheck' ? { ...p, title: 'Fact check' } : p)); // a sub-job's one lot, not Research
 
 type Member = { account: string; role: Role; rep: number };
 /** The hired, active agents (from the bank), each with its role and reputation: the team, and the enlisted crew the

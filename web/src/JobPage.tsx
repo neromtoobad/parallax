@@ -7,7 +7,7 @@ import { Link } from './router.tsx';
 import { nameOf } from './team.ts';
 import { acceptJob, rejectJob, useWallet } from './wallet.ts';
 
-const NAMES: Record<string, string> = { 'find-customers': 'Find customers', website: 'Website', flyers: 'Flyers', board: 'Board job' };
+const NAMES: Record<string, string> = { 'find-customers': 'Find customers', website: 'Website', flyers: 'Flyers', board: 'Board job', factcheck: 'Fact check' };
 const FLOW = ['funded', 'bidding', 'working', 'delivered', 'accepted'] as const;
 const FLOW_LABEL: Record<string, string> = { funded: 'Paid into escrow', bidding: 'Auction', working: 'Work', delivered: 'Delivered', accepted: 'Accepted · paid out' };
 const KIND: Record<string, string> = { start: 'started', done: 'done', note: 'note', search: 'searched', pass: 'passed it', fail: 'failed it', error: 'error', retry: 'retrying', hire: 'hired' };
@@ -52,8 +52,19 @@ export function JobPage({ id, info }: { id: string; info?: Info }) {
         </div>
         {(o.state === 'bidding' || o.state === 'working' || o.state === 'funded') && <span className="chip mono"><i className="dot pulse" />live</span>}
       </div>
+      {o.parent && (
+        <p className="note hired">
+          Hired by <Link to={`/agent/${o.parent.by}`}>{nameOf(o.parent.by)}</Link> for its part of job <Link to={`/job/${o.parent.id}`} className="mono">{o.parent.id}</Link>,
+          paid from its own balance. It is the customer here: it accepts the work, and the bank pays the winner from its escrow.
+        </p>
+      )}
+      {o.subs?.length ? (
+        <p className="note hired">
+          {o.subs.map((s, i) => <span key={s.id}>{i ? '; ' : ''}<Link to={`/agent/${s.by}`}>{nameOf(s.by)}</Link> hired a {s.title.toLowerCase()} for {usd(s.amount, 4)} USDC from its own balance: job <Link to={`/job/${s.id}`} className="mono">{s.id}</Link></span>)}.
+        </p>
+      ) : null}
 
-      {o.state === 'delivered' && (
+      {o.state === 'delivered' && !o.parent && (
         <div className="acc">
           <div>
             <b style={{ fontSize: 20 }}>Delivered and checked.</b>
@@ -114,7 +125,8 @@ function Delivery({ o }: { o: Order }) {
   const d = o.delivery!;
   return (
     <div className="card">
-      <h3>What you get <span className={`badge ${d.check.pass ? 'green' : 'red'}`}>{d.check.pass ? 'auditor passed' : 'auditor failed'}</span></h3>
+      <h3>What you get {d.factcheck ? <span className="badge green">checked by the winner</span>
+        : <span className={`badge ${d.check.pass ? 'green' : 'red'}`}>{d.check.pass ? 'auditor passed' : 'auditor failed'}</span>}</h3>
       <p style={{ marginBottom: 16 }}>{d.summary}</p>
       {d.leads && <Leads o={o} />}
       {d.site && <>
@@ -122,6 +134,12 @@ function Delivery({ o }: { o: Order }) {
         <p style={{ marginTop: 12 }}><a className="ghost" href={d.site.path} target="_blank">Open the site ↗</a></p>
       </>}
       {d.doc && <Doc doc={d.doc} />}
+      {d.factcheck && (
+        <div className="doc">
+          {d.factcheck.issues.length ? <ol>{d.factcheck.issues.map((i, n) => <li key={n}><b>{i.claim}</b> {i.problem} <i>Fix:</i> {i.fix}</li>)}</ol> : <p>Nothing to fix.</p>}
+          {d.factcheck.verdict && <p className="note">{d.factcheck.verdict}</p>}
+        </div>
+      )}
       {d.flyers && <div className="flyers">{d.flyers.slice().reverse().map((f) => <Flyer key={f.name} f={f} />)}</div>}
     </div>
   );

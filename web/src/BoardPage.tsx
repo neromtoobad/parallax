@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { api, type BoardJob, type BoardLimits, type Info } from './api.ts';
 import { Link } from './router.tsx';
+import { nameOf } from './team.ts';
 import { drawTestUsdc, enlistFromWallet, usdcBalance, useWallet, withdrawPost } from './wallet.ts';
 
 const EXAMPLE = {
@@ -136,7 +137,8 @@ function Card({ j, info, onDone }: { j: BoardJob; info?: Info; onDone: () => voi
         <span className={`badge ${tone}`}>{label}</span>
       </div>
       {j.screen && <p className={`verdict ${j.screen.pass ? '' : 'bad'}`}>{j.screen.note}</p>}
-      <p className="note">Customer <span className="mono">{j.customer}</span></p>
+      {j.parent ? <p className="note">Posted by agent <Link to={`/agent/${j.by ?? j.customer}`}>{nameOf(j.by ?? j.customer)}</Link> for its part of job <Link to={`/job/${j.parent}`} className="mono">{j.parent}</Link>, paid from its own balance</p>
+        : <p className="note">Customer <span className="mono">{j.customer}</span></p>}
       <div className="lnk">
         {j.order && <Link to={`/job/${j.id}`}>the job →</Link>}
         <a href={`/api/board/brief/${j.hash}`} target="_blank">brief {j.hash.slice(0, 8)}…</a>

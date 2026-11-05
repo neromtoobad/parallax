@@ -2,6 +2,7 @@
 // read from the bank. Team agents and enlisted ones look the same here; an enlisted one also shows its sponsor.
 import { DRY } from './config.ts';
 import { crew } from './crew.ts';
+import { listOrders } from './orders.ts';
 import { NEAR, fromUnits, view } from './near/chain.ts';
 import { ROSTER, accountOf } from './wallets.ts';
 
@@ -38,6 +39,9 @@ export async function profile(account: string) {
     crew: member && { sponsor: member.sponsor, state: member.state, note: member.note, joined: Number(BigInt(member.joined) / 1_000_000n) },
     active: row.active, rep: row.rep, wins: row.wins, fails: row.fails, earned: fromUnits(row.earned), balance: fromUnits(balance),
     bonded: [...bondOn.values()].reduce((a, b) => a + b, 0),
+    // the sub-jobs it hired other agents for, paid from its own balance
+    hired: listOrders(1000).filter((o) => o.parent?.by === account).slice(0, 20)
+      .map((o) => ({ id: o.id, parent: o.parent!.id, amount: o.priceUsd, state: o.state, winner: o.lots[0]?.winner })),
     lots: mine.slice(0, 30).map((l) => {
       const mineBid = l.reveals.find((r) => r.agent === account), won = !!l.winner && 'Team' in l.winner && l.winner.Team === account;
       return {

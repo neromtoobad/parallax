@@ -1353,3 +1353,101 @@ fn rule_37_hired_agents_are_not_struck_off() {
     assert_eq!(a.fails, 3);
     assert!(a.active);
 }
+
+// ---------------------------------------------------------------- rule 38: sub-jobs
+
+/// writer.testnet has won a 1 USDC part on j1 (alone, so it is paid its reserve) and holds 1 USDC at the bank.
+fn hiring() -> (Parallax, u64) {
+    let mut s = setup();
+    topped(&mut s, "writer.testnet", D);
+    let lot = won(&mut s);
+    (s, lot)
+}
+
+fn sub(s: &mut Parallax, lot: u64, who: &str, amount: u128) {
+    at(who, 45);
+    s.sub_post(lot, "sub1".into(), SPEC.into(), U128(amount));
+}
+
+#[test]
+fn rule_38_a_parts_winner_hires_from_its_own_balance() {
+    let (mut s, lot) = hiring();
+    let before = s.balance_of(acc("writer.testnet")).0;
+    let escrowed = s.overview().escrowed.0;
+    sub(&mut s, lot, "writer.testnet", 100_000);
+    let j = s.get_job("sub1".into()).unwrap();
+    assert_eq!(j.state, JobState::Funded);
+    assert_eq!(j.customer, acc("writer.testnet"));
+    assert_eq!(j.deliver_by, s.get_job("j1".into()).unwrap().deliver_by);
+    assert_eq!(s.balance_of(acc("writer.testnet")).0, before - 100_000);
+    assert_eq!(s.overview().escrowed.0, escrowed + 100_000);
+    assert_eq!(s.parent_of("sub1".into()), Some(U64(lot)));
+    assert!(get_logs().iter().any(|l| l.contains("\"sub\"") && l.contains("\"parent\":\"j1\"")));
+}
+
+#[test]
+#[should_panic(expected = "only a part's winner can hire for it, while it works on it")]
+fn rule_38_only_the_parts_winner_hires() {
+    let (mut s, lot) = hiring();
+    topped(&mut s, "scout.testnet", D);
+    sub(&mut s, lot, "scout.testnet", 100_000);
+}
+
+#[test]
+#[should_panic(expected = "a sub-job pays 0.005 USDC up to the pay of its part")]
+fn rule_38_a_sub_job_pays_no_more_than_its_part() {
+    let (mut s, lot) = hiring();
+    sub(&mut s, lot, "writer.testnet", D + 1);
+}
+
+#[test]
+#[should_panic(expected = "an agent can't bid on its own job")]
+fn rule_38_the_hirer_cant_bid_on_its_own_sub_job() {
+    let (mut s, lot) = hiring();
+    sub(&mut s, lot, "writer.testnet", 100_000);
+    at("cfo.testnet", 50);
+    let sl = s.open_lot("sub1".into(), "Fact check".into(), vec![], U128(80_000));
+    bid(&mut s, sl, "writer.testnet", 30_000, 51);
+}
+
+#[test]
+fn rule_38_accepting_a_sub_job_pays_another_agent() {
+    let (mut s, lot) = hiring();
+    topped(&mut s, "scout.testnet", D);
+    sub(&mut s, lot, "writer.testnet", 100_000);
+    at("cfo.testnet", 50);
+    let sl = s.open_lot("sub1".into(), "Fact check".into(), vec![], U128(80_000));
+    bid(&mut s, sl, "scout.testnet", 30_000, 51);
+    backed_reveal(&mut s, sl, "scout.testnet", 30_000, 71);
+    at("anyone.testnet", 91);
+    s.award(sl);
+    at("scout.testnet", 95);
+    s.deliver(sl, "notes".into(), None);
+    at("cfo.testnet", 100);
+    s.inspect(sl, true, "useful".into());
+    s.submit_job("sub1".into(), "notes".into());
+    at("writer.testnet", 110);
+    s.accept("sub1".into());
+    assert_eq!(s.get_job("sub1".into()).unwrap().state, JobState::Accepted);
+    // alone on the lot: paid its reserve, and its bond back; the writer's 0.1 paid for it
+    assert_eq!(s.balance_of(acc("scout.testnet")).0, D + 80_000);
+    assert_eq!(s.balance_of(acc("writer.testnet")).0, D - 100_000); // the reveal helper sent its own bond
+}
+
+#[test]
+fn rule_38_an_enlisted_agent_hires_through_the_operator() {
+    let mut s = passed();
+    funded(&mut s, "j1");
+    at("cfo.testnet", 0);
+    let lot = s.open_lot("j1".into(), "copy".into(), vec!["writer".into()], U128(D));
+    at("crew.testnet", 1);
+    s.crew_commit(acc(NIA), lot, commit_hash(lot, &acc(NIA), 100_000, "salt"));
+    at("crew.testnet", 21);
+    s.crew_reveal(acc(NIA), lot, U128(100_000), "salt".into());
+    at("anyone.testnet", 41);
+    s.award(lot);
+    at("crew.testnet", 45);
+    s.crew_sub_post(acc(NIA), lot, "sub1".into(), SPEC.into(), U128(50_000));
+    assert_eq!(s.get_job("sub1".into()).unwrap().customer, acc(NIA));
+    assert_eq!(s.balance_of(acc(NIA)).0, D / 2 - 20_000 - 50_000);
+}

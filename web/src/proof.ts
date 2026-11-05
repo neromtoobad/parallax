@@ -331,6 +331,15 @@ export async function verify(raw: Raw, tamper = false): Promise<Proof> {
     const funded = of('funded')[0], posted = of('posted')[0];
     if (posted) jp.checks.push({ ok: BigInt(posted.data.amount) === amount, what: 'Escrow', detail: `${posted.data.customer} put ${posted.data.amount} into escrow when it posted the job on the board, and the job is priced at ${job.amount}`, tx: posted.call.tx });
     if (funded) jp.checks.push({ ok: BigInt(funded.data.amount) === amount, what: 'Escrow', detail: `${funded.data.payer} paid ${funded.data.amount} into escrow for a job priced at ${job.amount}`, tx: funded.call.tx });
+    const sub = of('sub')[0];
+    if (sub) { // an agent hired this job for its own part, paid from its balance (rule 38)
+      const part = raw.lots.find((l) => l.id === Number(sub.data.lot));
+      jp.checks.push({
+        ok: BigInt(sub.data.amount) === amount && job.customer === sub.data.by && !!part?.winner && sellerOf(part.winner) === sub.data.by && part.job === sub.data.parent,
+        what: 'Escrow', detail: `${sub.data.by} paid ${sub.data.amount} from its own balance into escrow for a job priced at ${job.amount}, hired for lot ${sub.data.lot} of job ${sub.data.parent}, ${part?.winner ? `a part the bank awarded to ${sellerOf(part.winner)}` : 'a part with no winner'}`,
+        tx: sub.call.tx,
+      });
+    }
     const acc = of('accepted')[0], ref = of('refund')[0];
     if (acc) {
       jp.outcome = 'Accepted, paid out';

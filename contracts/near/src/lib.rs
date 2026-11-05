@@ -36,6 +36,11 @@
 //!    award and the winner when its work passes. Work that fails inspection pays
 //!    the bond to the customer, and an enlisted agent that fails three times is
 //!    taken off the crew.
+//! 7. **Sub-jobs.** An agent that has won a part can hire for it: it puts a
+//!    smaller job on chain, paid from its own balance into escrow and tied to
+//!    the part, and the CFO auctions it to the rest of the swarm. When the agent
+//!    accepts, the sub-job's winners are paid from that escrow, so money moves
+//!    from one agent's balance to another's under the same rules as any job.
 //!
 //! RULES.md is the plain-language version.
 
@@ -69,6 +74,8 @@ const NEWCOMER_WINS: u32 = 3;
 const BOND_BPS: u128 = 2_000;
 /// An enlisted agent whose work fails inspection this many times is taken off the crew.
 const CREW_MAX_FAILS: u32 = 3;
+/// A sub-job pays at least this, and at most the pay of the part it is for.
+const SUB_MIN: u128 = 5_000;
 /// A job on the board pays 1 to 25 USDC, takes 1 to 14 days, and waits at most a day to be taken.
 const POST_MIN: u128 = 1_000_000;
 const POST_MAX: u128 = 25_000_000;
@@ -406,6 +413,11 @@ fn bonds() -> LookupMap<String, u128> {
     LookupMap::new(b"Z".to_vec())
 }
 
+/// Sub-jobs by id, to the part each was posted for; under its own prefix like the bonds.
+fn subs() -> LookupMap<String, u64> {
+    LookupMap::new(b"Y".to_vec())
+}
+
 fn bond_key(lot: u64, agent: &AccountId) -> String {
     format!("{}:{}", lot, agent)
 }
@@ -698,6 +710,16 @@ impl Parallax {
 
     /// The CFO takes a posted job, with the TEE signature of the screen that passed its brief. It is then
     /// funded like any job, and its parts go to auction.
+    /// The winner of an awarded part hires other agents for it, from its own balance (rule 38).
+    pub fn sub_post(&mut self, lot: u64, id: String, spec: String, amount: U128) {
+        self.do_sub_post(env::predecessor_account_id(), lot, id, spec, amount.0);
+    }
+
+    /// The part a sub-job was posted for, if it is one.
+    pub fn parent_of(&self, job: String) -> Option<U64> {
+        subs().get(&job).map(|l| U64(*l))
+    }
+
     pub fn take_job(&mut self, id: String, note: String, tee: Option<Vec<TeeSig>>) {
         self.only_cfo();
         self.alive();
@@ -806,6 +828,20 @@ impl Parallax {
     pub fn crew_pay_bill(&mut self, agent: AccountId, amount: U128, memo: String) {
         self.only_operator(&agent);
         self.do_pay_bill(agent, amount, memo);
+    }
+
+    pub fn crew_sub_post(&mut self, agent: AccountId, lot: u64, id: String, spec: String, amount: U128) {
+        self.only_operator(&agent);
+        self.do_sub_post(agent, lot, id, spec, amount.0);
+    }
+
+    /// An enlisted agent accepts the work on a sub-job it posted.
+    pub fn crew_accept(&mut self, agent: AccountId, id: String) {
+        self.only_operator(&agent);
+        let j = self.job(&id);
+        require!(j.customer == agent, "only the customer");
+        require!(j.state == JobState::Submitted, "nothing to accept");
+        self.release(j, false);
     }
 
     // ============================================================ owner
@@ -1068,6 +1104,7 @@ impl Parallax {
         require!(env::block_timestamp() < l.commit_end.0, "commit window closed");
         require!(l.roles.is_empty() || l.roles.contains(&a.role), "not this agent's kind of work");
         require!(!l.excluded.contains(&me.to_string()), "excluded from this lot");
+        require!(self.jobs.get(&l.job).map_or(true, |j| j.customer != me), "an agent can't bid on its own job");
         require!(hash.len() == 64, "hash must be 32 bytes hex");
         l.commits.retain(|c| c.agent != me);
         l.commits.push(Commit { agent: me.clone(), hash });
@@ -1440,10 +1477,7 @@ impl Parallax {
 
     fn do_post(&mut self, customer: AccountId, m: PostMsg, amount: u128) {
         self.alive();
-        let id = m.id.as_bytes();
-        require!((4..=40).contains(&id.len()) && id.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-'), "job id: 4 to 40 of a-z, 0-9 and -");
-        require!(self.jobs.get(&m.id).is_none(), "job exists");
-        require!(m.spec.len() == 64 && m.spec.bytes().all(|c| c.is_ascii_hexdigit()), "spec must be a sha256 in hex");
+        self.check_new_job(&m.id, &m.spec);
         require!((POST_MIN..=POST_MAX).contains(&amount), "a job on the board pays 1 to 25 USDC");
         require!((1..=14).contains(&m.days), "1 to 14 days to deliver");
         let now = env::block_timestamp();
@@ -1465,6 +1499,44 @@ impl Parallax {
         self.escrowed += amount;
         self.jobs.insert(m.id.clone(), j);
         emit("posted", json!({"job": m.id, "customer": customer, "amount": U128(amount), "spec": m.spec, "days": m.days}));
+    }
+
+    fn check_new_job(&self, id: &str, spec: &str) {
+        let b = id.as_bytes();
+        require!((4..=40).contains(&b.len()) && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-'), "job id: 4 to 40 of a-z, 0-9 and -");
+        require!(self.jobs.get(id).is_none(), "job exists");
+        require!(spec.len() == 64 && spec.bytes().all(|c| c.is_ascii_hexdigit()), "spec must be a sha256 in hex");
+    }
+
+    /// The winner of an awarded part hires for it: a job paid from its balance, funded at once, due when the parent is.
+    fn do_sub_post(&mut self, me: AccountId, lot: u64, id: String, spec: String, amount: u128) {
+        self.alive();
+        let l = self.lot(lot);
+        require!(l.status == LotStatus::Awarded && l.winner == Some(Seller::Team(me.clone())), "only a part's winner can hire for it, while it works on it");
+        require!(amount >= SUB_MIN && amount <= l.pay.0, "a sub-job pays 0.005 USDC up to the pay of its part");
+        self.check_new_job(&id, &spec);
+        self.debit(&me, amount);
+        let parent = self.job(&l.job);
+        let now = env::block_timestamp();
+        let j = Job {
+            id: id.clone(),
+            customer: me.clone(),
+            amount: U128(amount),
+            bond: U128(0),
+            fund_by: U64(now),
+            deliver_by: parent.deliver_by,
+            accept_by: U64(0),
+            revised: false,
+            state: JobState::Funded,
+            spec_hash: spec.clone(),
+            deliverable_hash: String::new(),
+            lots: vec![],
+            reserved: U128(0),
+        };
+        self.escrowed += amount;
+        self.jobs.insert(id.clone(), j);
+        subs().insert(id.clone(), lot);
+        emit("sub", json!({"job": id, "parent": l.job, "lot": U64(lot), "by": me, "amount": U128(amount), "spec": spec}));
     }
 
     fn do_enlist(&mut self, sponsor: AccountId, m: EnlistMsg, stake: u128) {

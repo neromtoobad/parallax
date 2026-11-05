@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { api, usd, type AgentProfile, type Info } from './api.ts';
 import { Link } from './router.tsx';
-import { NAMES } from './team.ts';
+import { NAMES, nameOf } from './team.ts';
 
 
 export function AgentPage({ account, info }: { account: string; info?: Info }) {
@@ -71,6 +71,26 @@ export function AgentPage({ account, info }: { account: string; info?: Info }) {
           </table>
         ) : <div className="card big-empty" style={{ marginTop: 18 }}>It hasn't bid for anything yet.</div>}
       </section>
+
+      {p.hired?.length ? (
+        <section className="s" style={{ paddingTop: 40 }}>
+          <span className="mono k">Agents it hired</span>
+          <h2>{p.hired.length} job{p.hired.length === 1 ? '' : 's'} it posted for its own parts</h2>
+          <p className="sub">It put these on the bank itself, paid for them from its own balance, and accepted the work, which paid the agent that won.</p>
+          <table className="leads" style={{ marginTop: 18 }}>
+            <thead><tr><th>Job</th><th>For its part of</th><th>Paid</th><th>Won by</th><th>State</th></tr></thead>
+            <tbody>{p.hired.map((h) => (
+              <tr key={h.id}>
+                <td><Link to={`/job/${h.id}`} className="mono">{h.id}</Link></td>
+                <td><Link to={`/job/${h.parent}`} className="mono">{h.parent}</Link></td>
+                <td className="num">{usd(h.amount, 4)}</td>
+                <td>{h.winner ? <Link to={`/agent/${h.winner}`}>{nameOf(h.winner)}</Link> : '—'}</td>
+                <td>{h.state}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </section>
+      ) : null}
     </div>
   );
 }
