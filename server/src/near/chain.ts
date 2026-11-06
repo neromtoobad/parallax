@@ -31,15 +31,26 @@ export type Deployment = {
   compute?: string; // receives what agents pay for their model calls
   house?: string; // pays for demo jobs; hired by the bank so the CFO can top it up
   crew?: string; // the crew operator, which signs for enlisted agents named <slug>.<crew>
+  features?: Feature[]; // the optional parts the bank was built with; absent means all (testnet)
   team: Record<string, string>;
 };
+
+/** The bank's optional parts (Cargo features of contracts/near). The lean mainnet bank has none of them. */
+export type Feature = 'crew' | 'board' | 'market' | 'extras';
+export const FEATURES: Feature[] = ['crew', 'board', 'market', 'extras'];
 
 function load(): Deployment | null {
   if (!NET) return null;
   const f = process.env.PARALLAX_DEPLOYMENT ?? new URL(`../../../deployments/near-${NET}.json`, import.meta.url).pathname;
-  return existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : null;
+  if (!existsSync(f)) return null;
+  const d: Deployment = JSON.parse(readFileSync(f, 'utf8'));
+  // a bank without the crew has no operator, so nothing tries to sign for enlisted agents
+  if (d.features && !d.features.includes('crew')) delete d.crew;
+  return d;
 }
 export const NEAR = load();
+/** Whether the bank has an optional part. Demo mode shows them all. */
+export const has = (f: Feature) => !NEAR?.features || NEAR.features.includes(f);
 
 const RPCS = NEAR ? [process.env.NEAR_RPC ?? NEAR.rpc, ...(NEAR.rpcFallbacks ?? [])] : [];
 let rpcAt = 0;
@@ -261,12 +272,18 @@ export async function bankRoom(): Promise<number> {
     const a: any = await provider.viewAccount({ accountId: NEAR.bank, blockQuery: { finality: 'optimistic' } } as any);
     const free = Number((BigInt(a.amount) - BigInt(a.storage_usage) * 10n ** 19n) / 10n ** 18n) / 1e6;
     room = { at: Date.now(), near: free };
-    if (free < 0.5) console.warn(`bank: only ${free.toFixed(3)} NEAR left for storage; send NEAR to ${NEAR.bank}`);
+    if (free < ROOM_WARN) console.warn(`bank: only ${free.toFixed(3)} NEAR left for storage; send NEAR to ${NEAR.bank}`);
   } catch { /* keep the last reading */ }
   return room.near;
 }
-/** Below this the CFO takes no new work: enough for a job or two in flight to finish. */
-export const ROOM_MIN = 0.08;
+/** Below this the CFO takes no new work: enough for the jobs in flight to finish (each keeps ~0.025 NEAR of state).
+ * The lean mainnet bank starts with room for about six jobs, so it waits until the last one or two. */
+const LEAN = NEAR?.network === 'mainnet';
+/** Prepaid gas for a call that pays out USDC: small on mainnet, whose bank reserves 15 Tgas for a transfer and its
+ * callback (a signer holds its prepaid gas up front, ~0.001 NEAR a Tgas), larger on the testnet banks built before that. */
+export const tg = (mainnet: number, testnet: number) => (LEAN ? mainnet : testnet);
+export const ROOM_MIN = Number(process.env.PARALLAX_ROOM_MIN ?? (LEAN ? 0.04 : 0.08));
+const ROOM_WARN = LEAN ? 0.1 : 0.5;
 
 export async function usdcOf(id: string): Promise<number> {
   return fromUnits(await view<string>(NEAR!.usdc, 'ft_balance_of', { account_id: id }));
@@ -307,7 +324,7 @@ export function events(logs: string[], name?: string): { event: string; data: an
 
 /** An agent pays a model bill from its balance at the bank; the bank sends it to the compute account. */
 export const payBill = (agent: string, usd: number, memo: string) =>
-  act(agent, 'pay_bill', { amount: toUnits(usd), memo: memo.slice(0, 120) }, { tgas: 40 });
+  act(agent, 'pay_bill', { amount: toUnits(usd), memo: memo.slice(0, 120) }, { tgas: tg(25, 40) });
 
 /** Send USDC into the bank with a message (a deposit, or `job:<id>` to fund a job). */
 export const payBank = (from: string, usd: number, msg: string) =>

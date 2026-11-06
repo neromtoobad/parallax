@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { api, useLoad } from './api.ts';
+import { api, has, useLoad } from './api.ts';
 import { Home } from './Home.tsx';
 import { JobPage } from './JobPage.tsx';
 import { OrderPage } from './OrderPage.tsx';
@@ -9,7 +9,7 @@ import { BoardPage } from './BoardPage.tsx';
 import { CrewPage } from './CrewPage.tsx';
 import { AgentPage } from './AgentPage.tsx';
 import { CREW } from './team.ts';
-import { Footer, Nav } from './parts.tsx';
+import { Footer, Nav, Off } from './parts.tsx';
 import { usePath } from './router.tsx';
 import './styles.css';
 
@@ -26,7 +26,7 @@ function App() {
   return (
     <>
       <Nav info={info} />
-      {order ? <OrderPage id={order[1]} info={info} /> : agent ? <AgentPage account={agent[1]} info={info} /> : job ? <JobPage id={job[1]} info={info} /> : path === '/proof' ? <ProofPage /> : path === '/crew' ? <CrewPage info={info} /> : path === '/board' ? <BoardPage info={info} /> : <Home info={info} />}
+      {order ? <OrderPage id={order[1]} info={info} /> : agent ? <AgentPage account={agent[1]} info={info} /> : job ? <JobPage id={job[1]} info={info} /> : path === '/proof' ? <ProofPage /> : path === '/crew' ? (has(info, 'crew') ? <CrewPage info={info} /> : <Off what="the open crew" />) : path === '/board' ? (has(info, 'board') ? <BoardPage info={info} /> : <Off what="the board" />) : <Home info={info} />}
       <Footer info={info} />
     </>
   );

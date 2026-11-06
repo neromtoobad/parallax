@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { DATA_DIR, DRY } from './config.ts';
 import { Job } from './job.ts';
 import { NEARAI_HOST } from './nearai.ts';
-import { NEAR, call, canSign, fromUnits, sha256, toUnits, view } from './near/chain.ts';
+import { NEAR, call, canSign, fromUnits, sha256, tg, toUnits, view } from './near/chain.ts';
 import { settleBills } from './settle.ts';
 import { llmJson } from './tools.ts';
 import type { Role } from './wallets.ts';
@@ -217,7 +217,7 @@ async function review(m: Member) {
     tee = job.receipt.find((r) => r.tee)?.tee;
     bill = (await settleBills(job))[0]?.tx;
   }
-  const r = await call(NEAR!.cfo, NEAR!.bank, 'review', { agent: m.agent, pass, note, tee: tee ? [{ text: tee.text, signature: tee.signature }] : [] }, { tgas: 60 });
+  const r = await call(NEAR!.cfo, NEAR!.bank, 'review', { agent: m.agent, pass, note, tee: tee ? [{ text: tee.text, signature: tee.signature }] : [] }, { tgas: tg(30, 60) });
   const rec: Review = { agent: m.agent, pass, note, flags, model: tee?.text.split(':')[0], request, answer, tee, bill, tx: r.hash, at: new Date().toISOString() };
   mkdirSync(file('reviews'), { recursive: true });
   writeFileSync(file('reviews', `${m.agent}.json`), JSON.stringify(rec, null, 2));

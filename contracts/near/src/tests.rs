@@ -105,6 +105,7 @@ fn rule_02_cfo_cannot_move_more_than_max_move() {
     s.move_funds(Bucket::Operating, Bucket::Tools, U128(6 * D), "too much".into());
 }
 
+#[cfg(feature = "extras")]
 #[test]
 fn rule_02_bigger_moves_need_the_owner() {
     let mut s = setup();
@@ -312,6 +313,7 @@ fn rule_19_lowest_sealed_bid_wins_and_is_paid_the_runner_up_price() {
     assert_eq!(l.pay.0, 500_000);
 }
 
+#[cfg(feature = "market")]
 #[test]
 fn rule_18_an_agent_market_quote_can_win() {
     let mut s = setup();
@@ -792,6 +794,7 @@ fn enlist_msg(slug: &str, role: &str) -> String {
     format!(r#"enlist:{{"slug":"{}","role":"{}","name":"Nia","spec":"{}"}}"#, slug, role, SPEC)
 }
 
+#[cfg(feature = "crew")]
 /// The crew open under crew.testnet, and sam.testnet's writer Nia enlisted with half a USDC.
 fn crewed() -> Parallax {
     let mut s = setup();
@@ -801,6 +804,7 @@ fn crewed() -> Parallax {
     s
 }
 
+#[cfg(feature = "crew")]
 /// Nia passed review (with a TEE signature on the review answer).
 fn passed() -> Parallax {
     let mut s = crewed();
@@ -810,6 +814,7 @@ fn passed() -> Parallax {
     s
 }
 
+#[cfg(feature = "crew")]
 #[test]
 fn rule_28_anyone_can_enlist_an_agent_with_a_stake() {
     let s = crewed();
@@ -823,6 +828,7 @@ fn rule_28_anyone_can_enlist_an_agent_with_a_stake() {
     assert!(get_logs().iter().any(|l| l.contains("\"enlist\"") && l.contains(SPEC)));
 }
 
+#[cfg(feature = "crew")]
 #[test]
 #[should_panic(expected = "the crew isn't open yet")]
 fn rule_28_the_crew_opens_only_once_the_owner_names_an_operator() {
@@ -830,6 +836,7 @@ fn rule_28_the_crew_opens_only_once_the_owner_names_an_operator() {
     deposit(&mut s, "sam.testnet", D / 2, &enlist_msg("nia", "writer"));
 }
 
+#[cfg(feature = "crew")]
 #[test]
 #[should_panic(expected = "stake at least 0.10 USDC")]
 fn rule_28_an_agent_needs_a_stake_for_its_first_bills() {
@@ -837,6 +844,7 @@ fn rule_28_an_agent_needs_a_stake_for_its_first_bills() {
     deposit(&mut s, "sam.testnet", 99_999, &enlist_msg("ola", "writer"));
 }
 
+#[cfg(feature = "crew")]
 #[test]
 #[should_panic(expected = "that role isn't open to the crew")]
 fn rule_28_checking_stays_with_the_hired_auditors() {
@@ -844,6 +852,7 @@ fn rule_28_checking_stays_with_the_hired_auditors() {
     deposit(&mut s, "sam.testnet", D, &enlist_msg("ola", "auditor"));
 }
 
+#[cfg(feature = "crew")]
 #[test]
 #[should_panic(expected = "that name is taken")]
 fn rule_28_names_are_unique() {
@@ -851,6 +860,7 @@ fn rule_28_names_are_unique() {
     deposit(&mut s, "pat.testnet", D, &enlist_msg("nia", "scout"));
 }
 
+#[cfg(feature = "crew")]
 #[test]
 #[should_panic(expected = "at most 3 agents per sponsor")]
 fn rule_28_a_sponsor_has_at_most_three_agents_on_the_crew() {
@@ -860,6 +870,7 @@ fn rule_28_a_sponsor_has_at_most_three_agents_on_the_crew() {
     }
 }
 
+#[cfg(feature = "crew")]
 #[test]
 fn rule_28_the_house_wallet_can_enlist_from_its_balance() {
     let mut s = crewed();
@@ -874,6 +885,7 @@ fn rule_28_the_house_wallet_can_enlist_from_its_balance() {
     assert_eq!(s.balance_of(acc("scout.testnet")).0, D);
 }
 
+#[cfg(feature = "crew")]
 #[test]
 #[should_panic(expected = "agent not active")]
 fn rule_29_an_agent_under_review_cannot_bid() {
@@ -885,6 +897,7 @@ fn rule_29_an_agent_under_review_cannot_bid() {
     s.crew_commit(acc(NIA), lot, commit_hash(lot, &acc(NIA), 300_000, "salt"));
 }
 
+#[cfg(feature = "crew")]
 #[test]
 #[should_panic(expected = "only the CFO")]
 fn rule_29_only_the_cfo_reviews() {
@@ -893,6 +906,7 @@ fn rule_29_only_the_cfo_reviews() {
     s.review(acc(NIA), true, "looks fine to me".into(), None);
 }
 
+#[cfg(feature = "crew")]
 #[test]
 #[should_panic(expected = "a review must carry its TEE signature")]
 fn rule_29_with_require_tee_a_review_needs_its_signature() {
@@ -905,6 +919,7 @@ fn rule_29_with_require_tee_a_review_needs_its_signature() {
     s.review(acc(NIA), true, "ok".into(), None);
 }
 
+#[cfg(feature = "crew")]
 #[test]
 fn rule_29_a_failed_review_sends_the_stake_back() {
     let mut s = crewed();
@@ -915,6 +930,7 @@ fn rule_29_a_failed_review_sends_the_stake_back() {
     assert!(get_logs().iter().any(|l| l.contains("\"cash_out\"") && l.contains("\"to\":\"sam.testnet\"")));
 }
 
+#[cfg(feature = "crew")]
 #[test]
 fn rule_29_a_passed_agent_bids_wins_and_earns_like_the_team() {
     let mut s = passed();
@@ -940,6 +956,7 @@ fn rule_29_a_passed_agent_bids_wins_and_earns_like_the_team() {
     assert_eq!(s.get_agent(acc(NIA)).unwrap().wins, 1);
 }
 
+#[cfg(feature = "crew")]
 #[test]
 #[should_panic(expected = "only the crew operator")]
 fn rule_30_only_the_operator_signs_for_the_crew() {
@@ -948,6 +965,7 @@ fn rule_30_only_the_operator_signs_for_the_crew() {
     s.crew_pay_bill(acc(NIA), U128(1), "x".into());
 }
 
+#[cfg(feature = "crew")]
 #[test]
 #[should_panic(expected = "not on the crew")]
 fn rule_30_the_operator_cannot_sign_for_hired_agents() {
@@ -957,6 +975,7 @@ fn rule_30_the_operator_cannot_sign_for_hired_agents() {
     s.crew_pay_bill(acc("writer.testnet"), U128(1), "x".into());
 }
 
+#[cfg(feature = "crew")]
 #[test]
 fn rule_30_an_enlisted_agent_pays_its_bills_to_compute_under_the_cap() {
     let mut s = passed();
@@ -967,6 +986,7 @@ fn rule_30_an_enlisted_agent_pays_its_bills_to_compute_under_the_cap() {
     assert!(get_logs().iter().any(|l| l.contains("\"bill\"") && l.contains("\"to\":\"compute.testnet\"")));
 }
 
+#[cfg(feature = "crew")]
 #[test]
 fn rule_31_anyone_can_add_to_an_agents_balance() {
     let mut s = passed();
@@ -974,6 +994,7 @@ fn rule_31_anyone_can_add_to_an_agents_balance() {
     assert_eq!(s.balance_of(acc(NIA)).0, D / 2 + D);
 }
 
+#[cfg(feature = "crew")]
 #[test]
 fn rule_31_the_sponsor_cashes_out_and_retires_its_agent() {
     let mut s = passed();
@@ -986,6 +1007,7 @@ fn rule_31_the_sponsor_cashes_out_and_retires_its_agent() {
     assert_eq!(s.balance_of(acc(NIA)).0, 0);
 }
 
+#[cfg(feature = "crew")]
 #[test]
 #[should_panic(expected = "only its sponsor or the owner")]
 fn rule_31_nobody_else_can_retire_an_agent() {
@@ -994,6 +1016,7 @@ fn rule_31_nobody_else_can_retire_an_agent() {
     s.retire(acc(NIA));
 }
 
+#[cfg(feature = "crew")]
 #[test]
 fn rule_31_the_owner_can_take_an_agent_off_the_crew() {
     let mut s = passed();
@@ -1004,6 +1027,7 @@ fn rule_31_the_owner_can_take_an_agent_off_the_crew() {
     assert!(get_logs().iter().any(|l| l.contains("\"cash_out\"") && l.contains("\"to\":\"sam.testnet\"")));
 }
 
+#[cfg(feature = "crew")]
 /// Nia (record 300, on the crew) and the hired writer (500) bid on the same lot.
 fn nia_against_writer(s: &mut Parallax, nia: u128, writer: u128) -> u64 {
     funded(s, "j1");
@@ -1020,6 +1044,7 @@ fn nia_against_writer(s: &mut Parallax, nia: u128, writer: u128) -> u64 {
     lot
 }
 
+#[cfg(feature = "crew")]
 #[test]
 fn rule_32_a_newcomer_is_weighed_like_a_fresh_hire() {
     let mut s = passed();
@@ -1031,6 +1056,7 @@ fn rule_32_a_newcomer_is_weighed_like_a_fresh_hire() {
     assert_eq!(s.get_agent(acc(NIA)).unwrap().rep, REP_ENLIST);
 }
 
+#[cfg(feature = "crew")]
 #[test]
 fn rule_32_the_allowance_ends_after_three_passed_parts() {
     let mut s = passed();
@@ -1042,6 +1068,7 @@ fn rule_32_the_allowance_ends_after_three_passed_parts() {
     assert_eq!(s.get_lot(lot).unwrap().winner, Some(Seller::Team(acc("writer.testnet"))));
 }
 
+#[cfg(feature = "crew")]
 #[test]
 fn rule_32_the_allowance_ends_at_the_first_failed_inspection() {
     let mut s = passed();
@@ -1053,6 +1080,7 @@ fn rule_32_the_allowance_ends_at_the_first_failed_inspection() {
     assert_eq!(s.get_lot(lot).unwrap().winner, Some(Seller::Team(acc("writer.testnet"))));
 }
 
+#[cfg(feature = "crew")]
 #[test]
 fn rule_32_a_newcomer_with_a_better_record_keeps_it() {
     let mut s = passed();
@@ -1064,6 +1092,7 @@ fn rule_32_a_newcomer_with_a_better_record_keeps_it() {
     assert_eq!(s.get_lot(lot).unwrap().winner, Some(Seller::Team(acc(NIA))));
 }
 
+#[cfg(feature = "crew")]
 #[test]
 fn rule_32_hired_agents_get_no_allowance() {
     let mut s = passed();
@@ -1088,6 +1117,7 @@ fn posted() -> Parallax {
     s
 }
 
+#[cfg(feature = "board")]
 #[test]
 fn rule_33_anyone_can_put_a_job_on_the_board() {
     let s = posted();
@@ -1101,6 +1131,7 @@ fn rule_33_anyone_can_put_a_job_on_the_board() {
     assert!(get_logs().iter().any(|l| l.contains("\"posted\"") && l.contains(SPEC)));
 }
 
+#[cfg(feature = "board")]
 #[test]
 #[should_panic(expected = "a job on the board pays 1 to 25 USDC")]
 fn rule_33_a_post_pays_at_least_one_usdc() {
@@ -1108,6 +1139,7 @@ fn rule_33_a_post_pays_at_least_one_usdc() {
     deposit(&mut s, "ada.testnet", D / 2, &post_msg("bb01", 2));
 }
 
+#[cfg(feature = "board")]
 #[test]
 #[should_panic(expected = "1 to 14 days to deliver")]
 fn rule_33_a_post_gives_one_to_fourteen_days() {
@@ -1115,6 +1147,7 @@ fn rule_33_a_post_gives_one_to_fourteen_days() {
     deposit(&mut s, "ada.testnet", 2 * D, &post_msg("bb01", 30));
 }
 
+#[cfg(feature = "board")]
 #[test]
 fn rule_33_the_house_posts_from_its_balance() {
     let mut s = setup();
@@ -1125,6 +1158,7 @@ fn rule_33_the_house_posts_from_its_balance() {
     assert_eq!(s.get_job("bb02".into()).unwrap().state, JobState::Posted);
 }
 
+#[cfg(feature = "board")]
 #[test]
 fn rule_34_a_taken_job_is_auctioned_and_paid_like_any_job() {
     let mut s = posted();
@@ -1150,6 +1184,7 @@ fn rule_34_a_taken_job_is_auctioned_and_paid_like_any_job() {
     assert_eq!(s.overview().escrowed.0, 0);
 }
 
+#[cfg(feature = "board")]
 #[test]
 #[should_panic(expected = "only the CFO")]
 fn rule_34_only_the_cfo_takes_a_job() {
@@ -1158,6 +1193,7 @@ fn rule_34_only_the_cfo_takes_a_job() {
     s.take_job("bb01".into(), "mine".into(), None);
 }
 
+#[cfg(feature = "board")]
 #[test]
 #[should_panic(expected = "taking a job needs its screen's TEE signature")]
 fn rule_34_with_require_tee_taking_needs_the_screens_signature() {
@@ -1170,6 +1206,7 @@ fn rule_34_with_require_tee_taking_needs_the_screens_signature() {
     s.take_job("bb01".into(), "ok".into(), None);
 }
 
+#[cfg(feature = "board")]
 #[test]
 #[should_panic(expected = "the post has expired")]
 fn rule_34_an_expired_post_cannot_be_taken() {
@@ -1178,6 +1215,7 @@ fn rule_34_an_expired_post_cannot_be_taken() {
     s.take_job("bb01".into(), "late".into(), None);
 }
 
+#[cfg(feature = "board")]
 #[test]
 fn rule_35_a_declined_job_goes_back_to_its_customer() {
     let mut s = setup();
@@ -1191,6 +1229,7 @@ fn rule_35_a_declined_job_goes_back_to_its_customer() {
     assert_eq!(s.overview().escrowed.0, 0);
 }
 
+#[cfg(feature = "board")]
 #[test]
 #[should_panic(expected = "only the CFO, or the customer once the post has expired")]
 fn rule_35_the_customer_waits_a_day_before_withdrawing() {
@@ -1199,6 +1238,7 @@ fn rule_35_the_customer_waits_a_day_before_withdrawing() {
     s.decline_job("bb01".into(), "changed my mind".into(), None);
 }
 
+#[cfg(feature = "board")]
 #[test]
 fn rule_35_an_untaken_post_can_be_withdrawn() {
     let mut s = posted();
@@ -1298,6 +1338,7 @@ fn rule_36_failed_work_pays_the_bond_to_the_customer() {
 
 // ---------------------------------------------------------------- rule 37: struck off
 
+#[cfg(feature = "crew")]
 /// Nia wins a lot on a fresh job alone, and its work fails inspection.
 fn nia_fails(s: &mut Parallax, job: &str, t: u64) {
     funded(s, job);
@@ -1315,6 +1356,7 @@ fn nia_fails(s: &mut Parallax, job: &str, t: u64) {
     s.inspect(lot, false, "missed the brief".into());
 }
 
+#[cfg(feature = "crew")]
 #[test]
 fn rule_37_an_enlisted_agent_is_struck_off_at_its_third_failed_inspection() {
     let mut s = passed();
@@ -1364,11 +1406,13 @@ fn hiring() -> (Parallax, u64) {
     (s, lot)
 }
 
+#[cfg(feature = "board")]
 fn sub(s: &mut Parallax, lot: u64, who: &str, amount: u128) {
     at(who, 45);
     s.sub_post(lot, "sub1".into(), SPEC.into(), U128(amount));
 }
 
+#[cfg(feature = "board")]
 #[test]
 fn rule_38_a_parts_winner_hires_from_its_own_balance() {
     let (mut s, lot) = hiring();
@@ -1385,6 +1429,7 @@ fn rule_38_a_parts_winner_hires_from_its_own_balance() {
     assert!(get_logs().iter().any(|l| l.contains("\"sub\"") && l.contains("\"parent\":\"j1\"")));
 }
 
+#[cfg(feature = "board")]
 #[test]
 #[should_panic(expected = "only a part's winner can hire for it, while it works on it")]
 fn rule_38_only_the_parts_winner_hires() {
@@ -1393,6 +1438,7 @@ fn rule_38_only_the_parts_winner_hires() {
     sub(&mut s, lot, "scout.testnet", 100_000);
 }
 
+#[cfg(feature = "board")]
 #[test]
 #[should_panic(expected = "a sub-job pays 0.005 USDC up to the pay of its part")]
 fn rule_38_a_sub_job_pays_no_more_than_its_part() {
@@ -1400,6 +1446,7 @@ fn rule_38_a_sub_job_pays_no_more_than_its_part() {
     sub(&mut s, lot, "writer.testnet", D + 1);
 }
 
+#[cfg(feature = "board")]
 #[test]
 #[should_panic(expected = "an agent can't bid on its own job")]
 fn rule_38_the_hirer_cant_bid_on_its_own_sub_job() {
@@ -1410,6 +1457,7 @@ fn rule_38_the_hirer_cant_bid_on_its_own_sub_job() {
     bid(&mut s, sl, "writer.testnet", 30_000, 51);
 }
 
+#[cfg(feature = "board")]
 #[test]
 fn rule_38_accepting_a_sub_job_pays_another_agent() {
     let (mut s, lot) = hiring();
@@ -1434,6 +1482,7 @@ fn rule_38_accepting_a_sub_job_pays_another_agent() {
     assert_eq!(s.balance_of(acc("writer.testnet")).0, D - 100_000); // the reveal helper sent its own bond
 }
 
+#[cfg(all(feature = "board", feature = "crew"))]
 #[test]
 fn rule_38_an_enlisted_agent_hires_through_the_operator() {
     let mut s = passed();
@@ -1450,4 +1499,29 @@ fn rule_38_an_enlisted_agent_hires_through_the_operator() {
     s.crew_sub_post(acc(NIA), lot, "sub1".into(), SPEC.into(), U128(50_000));
     assert_eq!(s.get_job("sub1".into()).unwrap().customer, acc(NIA));
     assert_eq!(s.balance_of(acc(NIA)).0, D / 2 - 20_000 - 50_000);
+}
+
+// The lean mainnet build (no optional features) says what it has and refuses what it doesn't, so the token sends the money back.
+
+#[test]
+fn the_bank_names_its_features() {
+    let s = setup();
+    let all = cfg!(all(feature = "crew", feature = "board", feature = "market", feature = "extras"));
+    assert_eq!(s.features().len() == 4, all);
+}
+
+#[cfg(not(feature = "board"))]
+#[test]
+#[should_panic(expected = "this bank has no board")]
+fn lean_a_bank_without_the_board_refuses_a_post() {
+    let mut s = setup();
+    deposit(&mut s, "visitor.near", 2_000_000, r#"post:{"id":"bike-scan","spec":"aa","days":2}"#);
+}
+
+#[cfg(not(feature = "crew"))]
+#[test]
+#[should_panic(expected = "this bank has no open crew")]
+fn lean_a_bank_without_the_crew_refuses_a_stake() {
+    let mut s = setup();
+    deposit(&mut s, "sponsor.near", 250_000, r#"enlist:{"slug":"marlo","role":"writer","name":"Marlo","spec":"aa"}"#);
 }

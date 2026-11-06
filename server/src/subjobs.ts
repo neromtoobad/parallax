@@ -7,7 +7,7 @@ import { DRY } from './config.ts';
 import type { Job } from './job.ts';
 import { nameOf } from './wallets.ts';
 import { crewSpec } from './crew.ts';
-import { NEAR, act, balanceOf, canSign, sha256, toUnits } from './near/chain.ts';
+import { NEAR, act, balanceOf, canSign, has, sha256, toUnits } from './near/chain.ts';
 import { r6 } from './auction.ts';
 import { getOrder, markAccepted, noteSub, startSubJob } from './orders.ts';
 import { savePost } from './board.ts';
@@ -19,7 +19,7 @@ const SHARE = 0.4;
 const WAIT_MS = 10 * 60_000;
 
 export async function hireFactCheck(job: Job, p: { title: string; brief: string; draft: string }): Promise<{ id: string; issues: Issue[] } | undefined> {
-  if (DRY || !NEAR) return undefined;
+  if (DRY || !NEAR || !has('board')) return undefined;
   const lot = getOrder(job.orderId)?.lots.find((l) => l.status === 'awarded' && l.roles.includes('writer'));
   if (!lot?.winner || lot.winner.startsWith('outside:') || !lot.pay || !canSign(lot.winner)) return undefined;
   const who = lot.winner, name = crewSpec(who)?.name ?? nameOf(who), amount = r6(Math.min(lot.pay, Math.max(0.005, lot.pay * SHARE)));

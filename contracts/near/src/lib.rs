@@ -44,16 +44,15 @@
 //!
 //! RULES.md is the plain-language version.
 
+// The lean mainnet build leaves the optional parts out, and with them some helpers they share.
+#![cfg_attr(not(all(feature = "crew", feature = "board", feature = "market", feature = "extras")), allow(dead_code, unused_imports, unused_variables))]
+
 use near_sdk::json_types::{U128, U64};
-use near_sdk::serde_json::{json, Value};
 use near_sdk::store::{IterableMap, LookupMap, Vector};
 use near_sdk::{
     env, ext_contract, near, require, AccountId, Gas, NearToken, PanicOnDefault, PromiseError, PromiseOrValue,
 };
 
-mod migrate;
-#[cfg(test)]
-mod tests;
 
 const BPS: u128 = 10_000;
 const NS: u64 = 1_000_000_000;
@@ -87,8 +86,10 @@ const MAX_CREW: usize = 40;
 const MAX_PER_SPONSOR: usize = 3;
 /// The roles an enlisted agent may take. Checking stays with the hired auditors.
 const CREW_ROLES: [&str; 8] = ["scout", "researcher", "reader", "investigator", "writer", "analyst", "illustrator", "producer"];
-const FT_GAS: Gas = Gas::from_tgas(15);
-const CB_GAS: Gas = Gas::from_tgas(10);
+// A USDC transfer burns ~3 Tgas and the callback less. Every caller must hold its prepaid gas up front (~0.001 NEAR a Tgas),
+// so these stay small: a model bill is a 25 Tgas call, which an agent with 0.035 NEAR can always send.
+const FT_GAS: Gas = Gas::from_tgas(10);
+const CB_GAS: Gas = Gas::from_tgas(5);
 
 #[ext_contract(ext_ft)]
 #[allow(dead_code)]
@@ -204,6 +205,7 @@ pub struct Crew {
     pub joined: U64,
 }
 
+#[cfg(feature = "board")]
 /// `ft_transfer_call` msg `post:<this as JSON>`: the transfer is the budget, held in escrow.
 #[near(serializers = [json])]
 pub struct PostMsg {
@@ -212,6 +214,7 @@ pub struct PostMsg {
     pub days: u32,
 }
 
+#[cfg(feature = "crew")]
 /// `ft_transfer_call` msg `enlist:<this as JSON>`: the transfer is the stake.
 #[near(serializers = [json])]
 pub struct EnlistMsg {
@@ -413,6 +416,7 @@ fn bonds() -> LookupMap<String, u128> {
     LookupMap::new(b"Z".to_vec())
 }
 
+#[cfg(feature = "board")]
 /// Sub-jobs by id, to the part each was posted for; under its own prefix like the bonds.
 fn subs() -> LookupMap<String, u64> {
     LookupMap::new(b"Y".to_vec())
@@ -431,11 +435,31 @@ pub fn commit_hash(lot: u64, agent: &AccountId, price: u128, salt: &str) -> Stri
     hex(&env::sha256(format!("{}:{}:{}:{}", lot, agent, price, salt).as_bytes()))
 }
 
-fn emit(event: &str, data: Value) {
-    env::log_str(&format!(
-        "EVENT_JSON:{}",
-        json!({"standard": "parallax", "version": "1.0.0", "event": event, "data": [data]})
-    ));
+/// An event's data as JSON text, written field by field with serde_json. It reads like serde_json's `json!`
+/// but builds no `Value` tree, which keeps that machinery out of the contract and its storage cost down.
+macro_rules! json {
+    ({ $($k:literal : $v:expr),* $(,)? }) => {{
+        let mut s = String::from("{");
+        $(
+            if s.len() > 1 { s.push(','); }
+            s.push_str(concat!("\"", $k, "\":"));
+            s.push_str(&near_sdk::serde_json::to_string(&$v).unwrap_or_default());
+        )*
+        s.push('}');
+        s
+    }};
+}
+
+/// A NEP-297 event of the parallax standard. `event` is always a fixed name, so it needs no escaping.
+fn emit(event: &str, data: String) {
+    env::log_str(&format!("EVENT_JSON:{{\"standard\":\"parallax\",\"version\":\"1.0.0\",\"event\":\"{}\",\"data\":[{}]}}", event, data));
+}
+
+/// A TEE signature as an event shows it: the signer it recovered to and the text it is over.
+#[near(serializers = [json])]
+pub struct Signed {
+    pub signer: String,
+    pub text: String,
 }
 
 fn quality(rep: u16) -> u128 {
@@ -532,16 +556,23 @@ impl Parallax {
                 None => amount.0,
             }));
         }
+        #[cfg(feature = "board")]
         if let Some(m) = msg.strip_prefix("post:") {
             let m: PostMsg = near_sdk::serde_json::from_str(m).unwrap_or_else(|_| env::panic_str("post: expects {id, spec, days}"));
             self.do_post(sender_id, m, amount.0);
             return PromiseOrValue::Value(U128(0));
         }
+        #[cfg(feature = "crew")]
         if let Some(m) = msg.strip_prefix("enlist:") {
             let m: EnlistMsg = near_sdk::serde_json::from_str(m).unwrap_or_else(|_| env::panic_str("enlist: expects {slug, role, name, spec}"));
             self.do_enlist(sender_id, m, amount.0);
             return PromiseOrValue::Value(U128(0));
         }
+        // A bank built without the board or the crew refuses their messages, so the token sends the money back.
+        #[cfg(not(feature = "board"))]
+        require!(!msg.starts_with("post:"), "this bank has no board");
+        #[cfg(not(feature = "crew"))]
+        require!(!msg.starts_with("enlist:"), "this bank has no open crew");
         if let Some(a) = msg.strip_prefix("fund:") {
             let a: AccountId = a.parse().unwrap_or_else(|_| env::panic_str("fund: expects an agent account"));
             self.agent(&a);
@@ -566,15 +597,6 @@ impl Parallax {
         self.alive();
         require!(amount.0 <= self.policy.max_move.0, "over max_move: propose it to the owner");
         self.do_move(from, to, amount.0, &reason, false);
-    }
-
-    /// Free first jobs are paid from PROMO, moved into TOOLS, capped per epoch.
-    pub fn promo_to_tools(&mut self, amount: U128, job: String) {
-        self.only_cfo();
-        self.alive();
-        require!(self.epoch_promo + amount.0 <= self.policy.promo_cap.0, "over promo cap");
-        self.epoch_promo += amount.0;
-        self.do_move(Bucket::Promo, Bucket::Tools, amount.0, &job, false);
     }
 
     /// A new week. `plan_hash` seals the CFO's allocation record, published off chain.
@@ -646,14 +668,6 @@ impl Parallax {
         emit("signer_revoked", json!({"address": address, "by": by}));
     }
 
-    pub fn propose(&mut self, kind: Kind, who: Option<AccountId>, amount: U128, reason: String) -> u64 {
-        self.only_cfo();
-        let id = self.proposals.len() as u64;
-        self.proposals.push(Proposal { id, kind: kind.clone(), who: who.clone(), amount, reason: reason.clone(), done: false });
-        emit("proposed", json!({"id": U64(id), "kind": kind, "who": who, "amount": amount, "reason": reason}));
-        id
-    }
-
     // ============================================================ agents: money in the bank
 
     /// An agent pays for its model calls from its balance. The money goes only to the policy's
@@ -697,195 +711,12 @@ impl Parallax {
         self.pay_out(me, amount.0, "cash_out");
     }
 
-    // ============================================================ the board
-
-    /// Put a job on the board, paid from the caller's balance at the bank (the house wallet does this
-    /// for visitors without a wallet). From a wallet, send the budget with `ft_transfer_call` and msg
-    /// `post:{"id","spec","days"}` instead.
-    pub fn post_job(&mut self, id: String, spec: String, days: u32, amount: U128) {
-        let me = env::predecessor_account_id();
-        self.debit(&me, amount.0);
-        self.do_post(me, PostMsg { id, spec, days }, amount.0);
-    }
-
-    /// The CFO takes a posted job, with the TEE signature of the screen that passed its brief. It is then
-    /// funded like any job, and its parts go to auction.
-    /// The winner of an awarded part hires other agents for it, from its own balance (rule 38).
-    pub fn sub_post(&mut self, lot: u64, id: String, spec: String, amount: U128) {
-        self.do_sub_post(env::predecessor_account_id(), lot, id, spec, amount.0);
-    }
-
-    /// The part a sub-job was posted for, if it is one.
-    pub fn parent_of(&self, job: String) -> Option<U64> {
-        subs().get(&job).map(|l| U64(*l))
-    }
-
-    pub fn take_job(&mut self, id: String, note: String, tee: Option<Vec<TeeSig>>) {
-        self.only_cfo();
-        self.alive();
-        let mut j = self.job(&id);
-        require!(j.state == JobState::Posted, "not on the board");
-        require!(env::block_timestamp() <= j.fund_by.0, "the post has expired");
-        let signed = self.check_tee(tee.unwrap_or_default(), "taking a job needs its screen's TEE signature");
-        j.state = JobState::Funded;
-        let note: String = note.chars().take(280).collect();
-        emit("taken", json!({"job": id, "amount": j.amount, "note": note, "tee": signed}));
-        self.jobs.insert(id, j);
-    }
-
-    /// A posted job goes back to its customer: declined by the CFO (with its screen's signature, if a model
-    /// read it), or withdrawn by the customer once nobody has taken it within a day.
-    pub fn decline_job(&mut self, id: String, note: String, tee: Option<Vec<TeeSig>>) {
-        let me = env::predecessor_account_id();
-        let mut j = self.job(&id);
-        require!(j.state == JobState::Posted, "not on the board");
-        require!(me == self.cfo || (me == j.customer && env::block_timestamp() > j.fund_by.0), "only the CFO, or the customer once the post has expired");
-        let signed = if me == self.cfo { self.check_tee(tee.unwrap_or_default(), "") } else { vec![] };
-        j.state = JobState::Refunded;
-        self.escrowed -= j.amount.0;
-        let note: String = note.chars().take(280).collect();
-        emit("declined", json!({"job": id, "by": me, "refund": j.amount, "note": note, "tee": signed}));
-        let (to, amount) = (j.customer.clone(), j.amount.0);
-        self.jobs.insert(id, j);
-        self.send_to(&to, amount, "declined");
-    }
-
-    // ============================================================ the open crew
-
-    /// Add an agent to the crew, staked from the caller's balance at the bank (the house wallet does
-    /// this for visitors without a wallet). From a wallet, send the stake with `ft_transfer_call`
-    /// and msg `enlist:{"slug","role","name","spec"}` instead.
-    pub fn enlist(&mut self, slug: String, role: String, name: String, spec: String, stake: U128) {
-        let me = env::predecessor_account_id();
-        self.debit(&me, stake.0);
-        self.do_enlist(me, EnlistMsg { slug, role, name, spec }, stake.0);
-    }
-
-    /// The CFO's verdict on an enlisted agent, from an AI review of its spec. The review's own model
-    /// answer comes with its TEE signature. A pass lets it bid; a fail returns its stake.
-    pub fn review(&mut self, agent: AccountId, pass: bool, note: String, tee: Option<Vec<TeeSig>>) {
-        self.only_cfo();
-        self.alive();
-        let mut c = self.crew_of(&agent);
-        require!(c.state == CrewState::Review, "not waiting for review");
-        let signed = self.check_tee(tee.unwrap_or_default(), "a review must carry its TEE signature");
-        let mut a = self.agent(&agent);
-        a.active = pass;
-        self.agents.insert(agent.clone(), a);
-        c.state = if pass { CrewState::Active } else { CrewState::Rejected };
-        c.note = note.chars().take(280).collect();
-        emit("review", json!({"agent": agent, "pass": pass, "note": c.note, "tee": signed}));
-        let sponsor = c.sponsor.clone();
-        self.crew.insert(agent.clone(), c);
-        if !pass {
-            self.return_balance(&agent, &sponsor, "rejected");
-        }
-    }
-
-    /// The sponsor (or the owner) takes an enlisted agent off the crew. What it holds goes to the sponsor.
-    pub fn retire(&mut self, agent: AccountId) {
-        let me = env::predecessor_account_id();
-        let mut c = self.crew_of(&agent);
-        require!(me == c.sponsor || me == self.owner, "only its sponsor or the owner");
-        require!(matches!(c.state, CrewState::Review | CrewState::Active), "already off the crew");
-        let mut a = self.agent(&agent);
-        a.active = false;
-        self.agents.insert(agent.clone(), a);
-        c.state = CrewState::Retired;
-        let sponsor = c.sponsor.clone();
-        self.crew.insert(agent.clone(), c);
-        emit("retire", json!({"agent": agent, "by": me}));
-        self.return_balance(&agent, &sponsor, "retired");
-    }
-
-    /// The sponsor takes some of what its agent has earned. Pay for lots accepted after a retire lands here too.
-    pub fn crew_cash_out(&mut self, agent: AccountId, amount: U128) {
-        self.alive();
-        let c = self.crew_of(&agent);
-        require!(env::predecessor_account_id() == c.sponsor, "only its sponsor");
-        self.debit(&agent, amount.0);
-        emit("cash_out", json!({"agent": agent, "to": c.sponsor, "amount": amount}));
-        self.send_to(&c.sponsor, amount.0, "crew cash out");
-    }
-
-    // The crew operator signs for enlisted agents, with the same rules as an agent signing for itself.
-
-    pub fn crew_commit(&mut self, agent: AccountId, lot: u64, hash: String) {
-        self.only_operator(&agent);
-        self.do_commit(agent, lot, hash);
-    }
-
-    pub fn crew_reveal(&mut self, agent: AccountId, lot: u64, price: U128, salt: String) {
-        self.only_operator(&agent);
-        self.do_reveal(agent, lot, price, salt);
-    }
-
-    pub fn crew_deliver(&mut self, agent: AccountId, lot: u64, deliverable: String, tee: Option<Vec<TeeSig>>) {
-        self.only_operator(&agent);
-        self.do_deliver(agent, lot, deliverable, tee);
-    }
-
-    pub fn crew_pay_bill(&mut self, agent: AccountId, amount: U128, memo: String) {
-        self.only_operator(&agent);
-        self.do_pay_bill(agent, amount, memo);
-    }
-
-    pub fn crew_sub_post(&mut self, agent: AccountId, lot: u64, id: String, spec: String, amount: U128) {
-        self.only_operator(&agent);
-        self.do_sub_post(agent, lot, id, spec, amount.0);
-    }
-
-    /// An enlisted agent accepts the work on a sub-job it posted.
-    pub fn crew_accept(&mut self, agent: AccountId, id: String) {
-        self.only_operator(&agent);
-        let j = self.job(&id);
-        require!(j.customer == agent, "only the customer");
-        require!(j.state == JobState::Submitted, "nothing to accept");
-        self.release(j, false);
-    }
-
     // ============================================================ owner
-
-    /// Called by the bank itself in the transaction that deploys rule 32, so the history shows from which block
-    /// awards weigh newcomers (a fresh bank says so in `new`).
-    #[private]
-    pub fn mark_rules(&mut self) {
-        emit("rules", json!({"newcomer_wins": NEWCOMER_WINS}));
-    }
-
-    /// Called by the bank itself in the transaction that deploys bonds, so the history shows from which block
-    /// a revealed bid must carry one (a fresh bank says so in `new`).
-    #[private]
-    pub fn mark_bonds(&mut self) {
-        emit("rules", json!({"bond_bps": U128(BOND_BPS), "crew_max_fails": CREW_MAX_FAILS}));
-    }
 
     /// What an agent has locked as bonds on these lots.
     pub fn bonds_of(&self, agent: AccountId, lots: Vec<u64>) -> Vec<(u64, U128)> {
         let b = bonds();
         lots.into_iter().filter_map(|l| b.get(&bond_key(l, &agent)).map(|v| (l, U128(*v)))).collect()
-    }
-
-    /// The account that signs for enlisted agents. Enlisted agents are named <slug>.<operator>.
-    pub fn set_operator(&mut self, operator: AccountId) {
-        self.only_owner();
-        require!(self.crew.is_empty(), "the crew already has agents named under the current operator");
-        self.operator = Some(operator.clone());
-        emit("operator", json!({"operator": operator}));
-    }
-
-    pub fn co_sign(&mut self, id: u64) {
-        self.only_owner();
-        let mut p = self.proposals.get(id as u32).cloned().unwrap_or_else(|| env::panic_str("no such proposal"));
-        require!(!p.done, "already done");
-        p.done = true;
-        match &p.kind {
-            Kind::Move { from, to } => self.do_move(*from, *to, p.amount.0, &p.reason, true),
-            Kind::Hire { role } => self.do_hire(p.who.clone().expect("who"), role.clone()),
-            Kind::Fire => self.do_fire(p.who.clone().expect("who")),
-        }
-        self.proposals.replace(id as u32, p);
-        emit("co_signed", json!({"id": U64(id)}));
     }
 
     pub fn hire(&mut self, agent: AccountId, role: String) {
@@ -1140,22 +971,6 @@ impl Parallax {
         }
     }
 
-    /// The CFO enters an Agent Market agent's posted price as a bid.
-    pub fn add_outside(&mut self, lot: u64, handle: String, price: U128, quality_bps: u16, quote_ref: String) {
-        self.only_cfo();
-        self.alive();
-        let mut l = self.lot(lot);
-        require!(l.status == LotStatus::Bidding, "not bidding");
-        require!(env::block_timestamp() < l.reveal_end.0, "bidding closed");
-        require!(price.0 <= l.reserve.0, "quote above reserve");
-        require!((1_000..=10_000).contains(&quality_bps), "quality_bps out of range");
-        require!(!l.excluded.contains(&format!("outside:{}", handle)), "excluded from this lot");
-        l.outside.retain(|b| b.handle != handle);
-        l.outside.push(OutsideBid { handle: handle.clone(), price, quality_bps, quote_ref });
-        self.lots.replace(lot as u32, l);
-        emit("outside_bid", json!({"lot": U64(lot), "handle": handle, "price": price, "quality_bps": quality_bps}));
-    }
-
     /// Anyone may close a lot once reveals are over.
     pub fn award(&mut self, lot: u64) {
         self.alive();
@@ -1245,20 +1060,6 @@ impl Parallax {
         emit("deliver", json!({"lot": U64(lot), "by": me, "deliverable": deliverable, "tee": signed}));
     }
 
-    /// The CFO files an outside agent's work with its payment receipt.
-    pub fn deliver_outside(&mut self, lot: u64, deliverable: String, receipt: String) {
-        self.only_cfo();
-        self.alive();
-        let mut l = self.lot(lot);
-        require!(l.status == LotStatus::Awarded, "not awarded");
-        require!(matches!(l.winner, Some(Seller::Outside(_))), "winner is on the team");
-        l.status = LotStatus::Submitted;
-        l.deliverable = deliverable.clone();
-        l.receipt = receipt.clone();
-        self.lots.replace(lot as u32, l);
-        emit("deliver", json!({"lot": U64(lot), "deliverable": deliverable, "receipt": receipt}));
-    }
-
     /// The inspector's verdict. A pass books the pay; a fail re-auctions without the seller.
     pub fn inspect(&mut self, lot: u64, pass: bool, note: String) {
         self.only_cfo();
@@ -1288,6 +1089,7 @@ impl Parallax {
                     self.agents.insert(a.clone(), ag);
                     l.excluded.push(a.to_string());
                     self.slash(lot, a, &l.job);
+                    #[cfg(feature = "crew")]
                     self.strike(a, fails);
                 }
                 Seller::Outside(h) => l.excluded.push(format!("outside:{}", h)),
@@ -1364,11 +1166,6 @@ impl Parallax {
         self.jobs.get(&id).cloned()
     }
 
-    /// The jobs on the board waiting to be taken.
-    pub fn list_posted(&self) -> Vec<Job> {
-        self.jobs.values().filter(|j| j.state == JobState::Posted).cloned().collect()
-    }
-
     pub fn get_lot(&self, id: u64) -> Option<Lot> {
         self.lots.get(id as u32).cloned()
     }
@@ -1379,12 +1176,6 @@ impl Parallax {
 
     pub fn job_lots(&self, id: String) -> Vec<Lot> {
         self.jobs.get(&id).map(|j| j.lots.iter().map(|l| self.lot(*l)).collect()).unwrap_or_default()
-    }
-
-    pub fn list_proposals(&self, from: u64, limit: u64) -> Vec<Proposal> {
-        (from..(from + limit).min(self.proposals.len() as u64))
-            .filter_map(|i| self.proposals.get(i as u32).cloned())
-            .collect()
     }
 
     pub fn balance_of(&self, account: AccountId) -> U128 {
@@ -1399,6 +1190,118 @@ impl Parallax {
         self.signers.iter().map(|(a, s)| (a.clone(), s.clone())).collect()
     }
 
+    /// The optional parts this build of the bank has (Cargo features). A bank without this view has them all.
+    pub fn features(&self) -> Vec<String> {
+        [("crew", cfg!(feature = "crew")), ("board", cfg!(feature = "board")), ("market", cfg!(feature = "market")), ("extras", cfg!(feature = "extras"))]
+            .iter()
+            .filter(|f| f.1)
+            .map(|f| f.0.to_string())
+            .collect()
+    }
+
+    pub fn owed_to(&self, account: AccountId) -> U128 {
+        U128(self.owed.get(&account).copied().unwrap_or(0))
+    }
+
+}
+
+// The open crew (rules 28–31, 37): only in builds with the `crew` feature.
+#[cfg(feature = "crew")]
+#[near]
+impl Parallax {
+    /// Add an agent to the crew, staked from the caller's balance at the bank (the house wallet does
+    /// this for visitors without a wallet). From a wallet, send the stake with `ft_transfer_call`
+    /// and msg `enlist:{"slug","role","name","spec"}` instead.
+    pub fn enlist(&mut self, slug: String, role: String, name: String, spec: String, stake: U128) {
+        let me = env::predecessor_account_id();
+        self.debit(&me, stake.0);
+        self.do_enlist(me, EnlistMsg { slug, role, name, spec }, stake.0);
+    }
+
+    /// The CFO's verdict on an enlisted agent, from an AI review of its spec. The review's own model
+    /// answer comes with its TEE signature. A pass lets it bid; a fail returns its stake.
+    pub fn review(&mut self, agent: AccountId, pass: bool, note: String, tee: Option<Vec<TeeSig>>) {
+        self.only_cfo();
+        self.alive();
+        let mut c = self.crew_of(&agent);
+        require!(c.state == CrewState::Review, "not waiting for review");
+        let signed = self.check_tee(tee.unwrap_or_default(), "a review must carry its TEE signature");
+        let mut a = self.agent(&agent);
+        a.active = pass;
+        self.agents.insert(agent.clone(), a);
+        c.state = if pass { CrewState::Active } else { CrewState::Rejected };
+        c.note = note.chars().take(280).collect();
+        emit("review", json!({"agent": agent, "pass": pass, "note": c.note, "tee": signed}));
+        let sponsor = c.sponsor.clone();
+        self.crew.insert(agent.clone(), c);
+        if !pass {
+            self.return_balance(&agent, &sponsor, "rejected");
+        }
+    }
+
+    /// The sponsor (or the owner) takes an enlisted agent off the crew. What it holds goes to the sponsor.
+    pub fn retire(&mut self, agent: AccountId) {
+        let me = env::predecessor_account_id();
+        let mut c = self.crew_of(&agent);
+        require!(me == c.sponsor || me == self.owner, "only its sponsor or the owner");
+        require!(matches!(c.state, CrewState::Review | CrewState::Active), "already off the crew");
+        let mut a = self.agent(&agent);
+        a.active = false;
+        self.agents.insert(agent.clone(), a);
+        c.state = CrewState::Retired;
+        let sponsor = c.sponsor.clone();
+        self.crew.insert(agent.clone(), c);
+        emit("retire", json!({"agent": agent, "by": me}));
+        self.return_balance(&agent, &sponsor, "retired");
+    }
+
+    /// The sponsor takes some of what its agent has earned. Pay for lots accepted after a retire lands here too.
+    pub fn crew_cash_out(&mut self, agent: AccountId, amount: U128) {
+        self.alive();
+        let c = self.crew_of(&agent);
+        require!(env::predecessor_account_id() == c.sponsor, "only its sponsor");
+        self.debit(&agent, amount.0);
+        emit("cash_out", json!({"agent": agent, "to": c.sponsor, "amount": amount}));
+        self.send_to(&c.sponsor, amount.0, "crew cash out");
+    }
+
+    pub fn crew_commit(&mut self, agent: AccountId, lot: u64, hash: String) {
+        self.only_operator(&agent);
+        self.do_commit(agent, lot, hash);
+    }
+
+    pub fn crew_reveal(&mut self, agent: AccountId, lot: u64, price: U128, salt: String) {
+        self.only_operator(&agent);
+        self.do_reveal(agent, lot, price, salt);
+    }
+
+    pub fn crew_deliver(&mut self, agent: AccountId, lot: u64, deliverable: String, tee: Option<Vec<TeeSig>>) {
+        self.only_operator(&agent);
+        self.do_deliver(agent, lot, deliverable, tee);
+    }
+
+    pub fn crew_pay_bill(&mut self, agent: AccountId, amount: U128, memo: String) {
+        self.only_operator(&agent);
+        self.do_pay_bill(agent, amount, memo);
+    }
+
+    /// An enlisted agent accepts the work on a sub-job it posted.
+    pub fn crew_accept(&mut self, agent: AccountId, id: String) {
+        self.only_operator(&agent);
+        let j = self.job(&id);
+        require!(j.customer == agent, "only the customer");
+        require!(j.state == JobState::Submitted, "nothing to accept");
+        self.release(j, false);
+    }
+
+    /// The account that signs for enlisted agents. Enlisted agents are named <slug>.<operator>.
+    pub fn set_operator(&mut self, operator: AccountId) {
+        self.only_owner();
+        require!(self.crew.is_empty(), "the crew already has agents named under the current operator");
+        self.operator = Some(operator.clone());
+        emit("operator", json!({"operator": operator}));
+    }
+
     pub fn get_crew(&self, agent: AccountId) -> Option<Crew> {
         self.crew.get(&agent).cloned()
     }
@@ -1406,9 +1309,167 @@ impl Parallax {
     pub fn list_crew(&self) -> Vec<(AccountId, Crew)> {
         self.crew.iter().map(|(a, c)| (a.clone(), c.clone())).collect()
     }
+}
 
-    pub fn owed_to(&self, account: AccountId) -> U128 {
-        U128(self.owed.get(&account).copied().unwrap_or(0))
+// An enlisted agent hiring for its part needs both the crew and the board.
+#[cfg(all(feature = "crew", feature = "board"))]
+#[near]
+impl Parallax {
+    pub fn crew_sub_post(&mut self, agent: AccountId, lot: u64, id: String, spec: String, amount: U128) {
+        self.only_operator(&agent);
+        self.do_sub_post(agent, lot, id, spec, amount.0);
+    }
+}
+
+// The board and sub-jobs (rules 33–35, 38): only in builds with the `board` feature.
+#[cfg(feature = "board")]
+#[near]
+impl Parallax {
+    /// Put a job on the board, paid from the caller's balance at the bank (the house wallet does this
+    /// for visitors without a wallet). From a wallet, send the budget with `ft_transfer_call` and msg
+    /// `post:{"id","spec","days"}` instead.
+    pub fn post_job(&mut self, id: String, spec: String, days: u32, amount: U128) {
+        let me = env::predecessor_account_id();
+        self.debit(&me, amount.0);
+        self.do_post(me, PostMsg { id, spec, days }, amount.0);
+    }
+
+    /// The winner of an awarded part hires other agents for it, from its own balance (rule 38).
+    pub fn sub_post(&mut self, lot: u64, id: String, spec: String, amount: U128) {
+        self.do_sub_post(env::predecessor_account_id(), lot, id, spec, amount.0);
+    }
+
+    /// The part a sub-job was posted for, if it is one.
+    pub fn parent_of(&self, job: String) -> Option<U64> {
+        subs().get(&job).map(|l| U64(*l))
+    }
+
+    /// The CFO takes a posted job, with the TEE signature of the screen that passed its brief. It is then
+    /// funded like any job, and its parts go to auction.
+    pub fn take_job(&mut self, id: String, note: String, tee: Option<Vec<TeeSig>>) {
+        self.only_cfo();
+        self.alive();
+        let mut j = self.job(&id);
+        require!(j.state == JobState::Posted, "not on the board");
+        require!(env::block_timestamp() <= j.fund_by.0, "the post has expired");
+        let signed = self.check_tee(tee.unwrap_or_default(), "taking a job needs its screen's TEE signature");
+        j.state = JobState::Funded;
+        let note: String = note.chars().take(280).collect();
+        emit("taken", json!({"job": id, "amount": j.amount, "note": note, "tee": signed}));
+        self.jobs.insert(id, j);
+    }
+
+    /// A posted job goes back to its customer: declined by the CFO (with its screen's signature, if a model
+    /// read it), or withdrawn by the customer once nobody has taken it within a day.
+    pub fn decline_job(&mut self, id: String, note: String, tee: Option<Vec<TeeSig>>) {
+        let me = env::predecessor_account_id();
+        let mut j = self.job(&id);
+        require!(j.state == JobState::Posted, "not on the board");
+        require!(me == self.cfo || (me == j.customer && env::block_timestamp() > j.fund_by.0), "only the CFO, or the customer once the post has expired");
+        let signed = if me == self.cfo { self.check_tee(tee.unwrap_or_default(), "") } else { vec![] };
+        j.state = JobState::Refunded;
+        self.escrowed -= j.amount.0;
+        let note: String = note.chars().take(280).collect();
+        emit("declined", json!({"job": id, "by": me, "refund": j.amount, "note": note, "tee": signed}));
+        let (to, amount) = (j.customer.clone(), j.amount.0);
+        self.jobs.insert(id, j);
+        self.send_to(&to, amount, "declined");
+    }
+
+    /// The jobs on the board waiting to be taken.
+    pub fn list_posted(&self) -> Vec<Job> {
+        self.jobs.values().filter(|j| j.state == JobState::Posted).cloned().collect()
+    }
+}
+
+// Agent Market bids: only in builds with the `market` feature.
+#[cfg(feature = "market")]
+#[near]
+impl Parallax {
+    /// The CFO enters an Agent Market agent's posted price as a bid.
+    pub fn add_outside(&mut self, lot: u64, handle: String, price: U128, quality_bps: u16, quote_ref: String) {
+        self.only_cfo();
+        self.alive();
+        let mut l = self.lot(lot);
+        require!(l.status == LotStatus::Bidding, "not bidding");
+        require!(env::block_timestamp() < l.reveal_end.0, "bidding closed");
+        require!(price.0 <= l.reserve.0, "quote above reserve");
+        require!((1_000..=10_000).contains(&quality_bps), "quality_bps out of range");
+        require!(!l.excluded.contains(&format!("outside:{}", handle)), "excluded from this lot");
+        l.outside.retain(|b| b.handle != handle);
+        l.outside.push(OutsideBid { handle: handle.clone(), price, quality_bps, quote_ref });
+        self.lots.replace(lot as u32, l);
+        emit("outside_bid", json!({"lot": U64(lot), "handle": handle, "price": price, "quality_bps": quality_bps}));
+    }
+
+    /// The CFO files an outside agent's work with its payment receipt.
+    pub fn deliver_outside(&mut self, lot: u64, deliverable: String, receipt: String) {
+        self.only_cfo();
+        self.alive();
+        let mut l = self.lot(lot);
+        require!(l.status == LotStatus::Awarded, "not awarded");
+        require!(matches!(l.winner, Some(Seller::Outside(_))), "winner is on the team");
+        l.status = LotStatus::Submitted;
+        l.deliverable = deliverable.clone();
+        l.receipt = receipt.clone();
+        self.lots.replace(lot as u32, l);
+        emit("deliver", json!({"lot": U64(lot), "deliverable": deliverable, "receipt": receipt}));
+    }
+}
+
+// Owner co-signed proposals, the promo budget, testnet upgrade markers and a hashing helper: only with `extras`.
+#[cfg(feature = "extras")]
+#[near]
+impl Parallax {
+    pub fn propose(&mut self, kind: Kind, who: Option<AccountId>, amount: U128, reason: String) -> u64 {
+        self.only_cfo();
+        let id = self.proposals.len() as u64;
+        self.proposals.push(Proposal { id, kind: kind.clone(), who: who.clone(), amount, reason: reason.clone(), done: false });
+        emit("proposed", json!({"id": U64(id), "kind": kind, "who": who, "amount": amount, "reason": reason}));
+        id
+    }
+
+    pub fn co_sign(&mut self, id: u64) {
+        self.only_owner();
+        let mut p = self.proposals.get(id as u32).cloned().unwrap_or_else(|| env::panic_str("no such proposal"));
+        require!(!p.done, "already done");
+        p.done = true;
+        match &p.kind {
+            Kind::Move { from, to } => self.do_move(*from, *to, p.amount.0, &p.reason, true),
+            Kind::Hire { role } => self.do_hire(p.who.clone().expect("who"), role.clone()),
+            Kind::Fire => self.do_fire(p.who.clone().expect("who")),
+        }
+        self.proposals.replace(id as u32, p);
+        emit("co_signed", json!({"id": U64(id)}));
+    }
+
+    pub fn list_proposals(&self, from: u64, limit: u64) -> Vec<Proposal> {
+        (from..(from + limit).min(self.proposals.len() as u64))
+            .filter_map(|i| self.proposals.get(i as u32).cloned())
+            .collect()
+    }
+
+    /// Free first jobs are paid from PROMO, moved into TOOLS, capped per epoch.
+    pub fn promo_to_tools(&mut self, amount: U128, job: String) {
+        self.only_cfo();
+        self.alive();
+        require!(self.epoch_promo + amount.0 <= self.policy.promo_cap.0, "over promo cap");
+        self.epoch_promo += amount.0;
+        self.do_move(Bucket::Promo, Bucket::Tools, amount.0, &job, false);
+    }
+
+    /// Called by the bank itself in the transaction that deploys rule 32, so the history shows from which block
+    /// awards weigh newcomers (a fresh bank says so in `new`).
+    #[private]
+    pub fn mark_rules(&mut self) {
+        emit("rules", json!({"newcomer_wins": NEWCOMER_WINS}));
+    }
+
+    /// Called by the bank itself in the transaction that deploys bonds, so the history shows from which block
+    /// a revealed bid must carry one (a fresh bank says so in `new`).
+    #[private]
+    pub fn mark_bonds(&mut self) {
+        emit("rules", json!({"bond_bps": U128(BOND_BPS), "crew_max_fails": CREW_MAX_FAILS}));
     }
 
     pub fn hash_bid(&self, lot: u64, agent: AccountId, price: U128, salt: String) -> String {
@@ -1451,17 +1512,19 @@ impl Parallax {
         if newcomer { ag.rep.max(REP_START) } else { ag.rep }
     }
 
+    #[cfg(feature = "crew")]
     fn crew_of(&self, a: &AccountId) -> Crew {
         self.crew.get(a).cloned().unwrap_or_else(|| env::panic_str("not on the crew"))
     }
 
+    #[cfg(feature = "crew")]
     fn only_operator(&self, agent: &AccountId) {
         require!(Some(env::predecessor_account_id()) == self.operator, "only the crew operator");
         self.crew_of(agent);
     }
 
     /// Each signature must recover to an active approved signer, over "model:sha256:sha256" for its model.
-    fn check_tee(&self, tee: Vec<TeeSig>, needed: &str) -> Vec<Value> {
+    fn check_tee(&self, tee: Vec<TeeSig>, needed: &str) -> Vec<Signed> {
         require!(tee.len() <= 12, "at most 12 signatures");
         require!(!self.policy.require_tee || !tee.is_empty(), needed);
         let mut signed = vec![];
@@ -1470,11 +1533,12 @@ impl Parallax {
             let sg = self.signers.get(&who).filter(|s| s.active).unwrap_or_else(|| env::panic_str("signed by a key the bank hasn't approved"));
             let parts: Vec<&str> = t.text.rsplitn(3, ':').collect();
             require!(parts.len() == 3 && parts[2] == sg.model && parts[0].len() == 64 && parts[1].len() == 64, "the signed text isn't model:request:answer for this signer's model");
-            signed.push(json!({"signer": who, "text": t.text}));
+            signed.push(Signed { signer: who, text: t.text.clone() });
         }
         signed
     }
 
+    #[cfg(feature = "board")]
     fn do_post(&mut self, customer: AccountId, m: PostMsg, amount: u128) {
         self.alive();
         self.check_new_job(&m.id, &m.spec);
@@ -1501,6 +1565,7 @@ impl Parallax {
         emit("posted", json!({"job": m.id, "customer": customer, "amount": U128(amount), "spec": m.spec, "days": m.days}));
     }
 
+    #[cfg(feature = "board")]
     fn check_new_job(&self, id: &str, spec: &str) {
         let b = id.as_bytes();
         require!((4..=40).contains(&b.len()) && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-'), "job id: 4 to 40 of a-z, 0-9 and -");
@@ -1508,6 +1573,7 @@ impl Parallax {
         require!(spec.len() == 64 && spec.bytes().all(|c| c.is_ascii_hexdigit()), "spec must be a sha256 in hex");
     }
 
+    #[cfg(feature = "board")]
     /// The winner of an awarded part hires for it: a job paid from its balance, funded at once, due when the parent is.
     fn do_sub_post(&mut self, me: AccountId, lot: u64, id: String, spec: String, amount: u128) {
         self.alive();
@@ -1539,6 +1605,7 @@ impl Parallax {
         emit("sub", json!({"job": id, "parent": l.job, "lot": U64(lot), "by": me, "amount": U128(amount), "spec": spec}));
     }
 
+    #[cfg(feature = "crew")]
     fn do_enlist(&mut self, sponsor: AccountId, m: EnlistMsg, stake: u128) {
         self.alive();
         let op = self.operator.clone().unwrap_or_else(|| env::panic_str("the crew isn't open yet"));
@@ -1579,6 +1646,7 @@ impl Parallax {
         self.credit(&id, stake, "stake");
     }
 
+    #[cfg(feature = "crew")]
     /// An enlisted agent's whole balance goes back to its sponsor.
     fn return_balance(&mut self, agent: &AccountId, sponsor: &AccountId, why: &str) {
         let b = self.balances.get(agent).copied().unwrap_or(0);
@@ -1655,6 +1723,7 @@ impl Parallax {
         self.send_to(&to, bond, "bond for failed work");
     }
 
+    #[cfg(feature = "crew")]
     /// An enlisted agent whose work has failed CREW_MAX_FAILS times comes off the crew, and what it holds goes to
     /// its sponsor. A bond still out on another lot comes back to its balance later, for the sponsor to take.
     fn strike(&mut self, agent: &AccountId, fails: u32) {
@@ -1827,3 +1896,9 @@ impl Parallax {
             .detach();
     }
 }
+
+// After the json! macro above, so both can use it.
+#[cfg(feature = "extras")]
+mod migrate;
+#[cfg(test)]
+mod tests;

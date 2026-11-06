@@ -9,7 +9,7 @@
 import { randomBytes } from 'node:crypto';
 import { DRY } from './config.ts';
 import { publish } from './bus.ts';
-import { NEAR, act, balanceOf, call, canSign, chainNow, events, fromUnits, isCrew, sha256, toUnits, view } from './near/chain.ts';
+import { NEAR, act, balanceOf, call, canSign, chainNow, events, fromUnits, has, isCrew, sha256, toUnits, view } from './near/chain.ts';
 import { crewSpec } from './crew.ts';
 import { type Role } from './wallets.ts';
 import { spendFor } from './cfo/treasury.ts';
@@ -143,13 +143,13 @@ const researchTask = (service: string, brief: string) =>
 async function outsideQuotes(orderId: string, l: Open, topic: string) {
   const quotes = await researchQuotes(topic, 3).catch(() => []);
   // a demo can show an outside win, since nothing is paid in a demo
-  const enter = DRY || canHire();
+  const enter = DRY || (canHire() && has('market'));
   l.quotes = [];
   for (const q of quotes) {
     const row = { handle: q.handle, price: q.priceUsd, quality: q.qualityBps, entered: false, why: '' };
     if (q.priceUsd > l.reserve) row.why = `asks ${q.priceUsd} USDC, above the ${l.reserve} reserve`;
     else if (!goodRecord(q.delivered, q.successPct)) row.why = `its record is ${q.successPct}% over ${q.delivered} tasks`;
-    else if (!enter) row.why = 'hiring on the Agent Market is off';
+    else if (!enter) row.why = has('market') ? 'hiring on the Agent Market is off' : 'this bank takes no Agent Market bids';
     else {
       try {
         if (!DRY) await call(NEAR!.cfo, NEAR!.bank, 'add_outside', { lot: l.id, handle: q.handle, price: toUnits(q.priceUsd), quality_bps: q.qualityBps, quote_ref: q.ref });

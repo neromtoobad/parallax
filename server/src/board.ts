@@ -13,7 +13,7 @@ import { randomBytes } from 'node:crypto';
 import { DATA_DIR, DRY } from './config.ts';
 import { Job } from './job.ts';
 import { NEARAI_HOST } from './nearai.ts';
-import { NEAR, ROOM_MIN, bankRoom, call, canSign, fromUnits, sha256, toUnits, view } from './near/chain.ts';
+import { NEAR, ROOM_MIN, bankRoom, call, canSign, fromUnits, sha256, tg, toUnits, view } from './near/chain.ts';
 import { getOrder, startBoardJob } from './orders.ts';
 import { briefOf } from './services/check.ts';
 import { fields } from './services/board.ts';
@@ -165,8 +165,8 @@ async function screen(j: Posted) {
   }
   const sigs = tee ? [{ text: tee.text, signature: tee.signature }] : [];
   const r = pass
-    ? await call(NEAR!.cfo, NEAR!.bank, 'take_job', { id: j.id, note, tee: sigs }, { tgas: 60 })
-    : await call(NEAR!.cfo, NEAR!.bank, 'decline_job', { id: j.id, note, tee: sigs }, { tgas: 60 });
+    ? await call(NEAR!.cfo, NEAR!.bank, 'take_job', { id: j.id, note, tee: sigs }, { tgas: tg(30, 60) })
+    : await call(NEAR!.cfo, NEAR!.bank, 'decline_job', { id: j.id, note, tee: sigs }, { tgas: tg(30, 60) });
   const rec: Screen = { job: j.id, pass, note, flags, model: tee?.text.split(':')[0], request, answer, tee, bill, tx: r.hash, at: new Date().toISOString() };
   mkdirSync(dir('screens'), { recursive: true });
   writeFileSync(dir('screens', `${j.id}.json`), JSON.stringify(rec, null, 2));

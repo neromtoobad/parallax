@@ -37,7 +37,11 @@ export type Order = {
 export type Info = {
   mode: string; model: string; bank: string | null; explorer: string | null; usdc: string | null; search: boolean;
   canned: boolean; house: string | null; faucet: boolean; crew: string | null; board?: boolean;
+  /** The bank's optional parts; the lean mainnet bank has none. Missing (an older server) means all. */
+  features?: string[];
 };
+/** Whether this deployment's bank has an optional part (the crew, the board). */
+export const has = (info: Info | undefined, f: 'crew' | 'board') => !info?.features || info.features.includes(f);
 export type BoardJob = {
   id: string; title: string; brief: string; hash: string; days: number; budgetUsd: number; at: string; parent?: string; by?: string;
   state: string; customer?: string; order?: string; screen?: { pass: boolean; note: string; tx: string; signer?: string };

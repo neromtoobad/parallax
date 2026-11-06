@@ -8,6 +8,15 @@ license = "MIT"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# Testnet runs every part. The lean mainnet bank (`--no-default-features`) keeps the treasury, escrow, lots,
+# bonds and TEE checks and leaves these out, which takes about a fifth off its code and the NEAR it locks.
+default = ["crew", "board", "market", "extras"]
+crew = []    # the open crew: enlist, review, crew_* calls (rules 28-31, 37)
+board = []   # the board and sub-jobs (rules 33-35, 38)
+market = []  # Agent Market bids entered by the CFO
+extras = []  # owner co-signed proposals, the promo budget, testnet upgrade code
+
 [dependencies]
 near-sdk = { version = "5.30", features = ["unstable"] } # unstable: env::ecrecover
 

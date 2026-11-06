@@ -10,7 +10,7 @@ import { publish } from './bus.ts';
 import { Job } from './job.ts';
 import { assignmentFor, auction, closeLots, type LotRecord } from './lots.ts';
 import { NEARAI_HOST } from './nearai.ts';
-import { NEAR, ROOM_MIN, balanceOf, bankRoom, call, isAccountId, sha256, toUnits, txUrl, view } from './near/chain.ts';
+import { NEAR, ROOM_MIN, balanceOf, bankRoom, call, isAccountId, sha256, tg, toUnits, txUrl, view } from './near/chain.ts';
 import { priceFor, recordSpend } from './cfo/treasury.ts';
 import { findService, type Delivery } from './services/index.ts';
 import { briefOf } from './services/check.ts';
@@ -202,7 +202,7 @@ export const sitePath = (id: string) => join(DATA_DIR, 'sites', id, 'index.html'
 export async function accept(o: Order, txHash?: string) {
   if (o.state !== 'delivered') throw new Error('nothing to accept yet');
   if (!DRY) {
-    if (o.customer === DEMO_PAYER) tx(o, 'Accepted; escrow released to the winners', (await call(o.customer, NEAR!.bank, 'accept', { id: o.id }, { tgas: 150 })).hash);
+    if (o.customer === DEMO_PAYER) tx(o, 'Accepted; escrow released to the winners', (await call(o.customer, NEAR!.bank, 'accept', { id: o.id }, { tgas: tg(40, 150) })).hash);
     else {
       // The customer signed bank.accept in their own wallet; the bank is the record of it.
       if ((await jobState(o.id, 'Accepted')) !== 'Accepted') throw new Error('the bank has not seen your acceptance yet');
@@ -241,7 +241,7 @@ export async function refundLate(): Promise<string[]> {
   for (const o of listOrders(200).filter((o) => ['funded', 'bidding', 'working', 'failed'].includes(o.state) && !o.refunded)) {
     const j = await view<{ state: string; deliver_by: string }>(NEAR.bank, 'get_job', { id: o.id }).catch(() => undefined);
     if (!j || j.state !== 'Funded' || Date.now() * 1e6 <= Number(j.deliver_by)) continue;
-    tx(o, 'Not delivered in time; the full price refunded', (await call(NEAR.cfo, NEAR.bank, 'refund_late', { id: o.id }, { tgas: 60 })).hash);
+    tx(o, 'Not delivered in time; the full price refunded', (await call(NEAR.cfo, NEAR.bank, 'refund_late', { id: o.id }, { tgas: tg(30, 60) })).hash);
     o.refunded = true;
     if (o.state !== 'failed') { o.state = 'failed'; o.error = 'The team did not deliver in time.'; }
     save(o);

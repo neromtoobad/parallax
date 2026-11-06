@@ -12,7 +12,7 @@ import { accept, demoPayer, fund, getOrder, listOrders, quote, rejected, sitePat
 import { startTreasury } from './cfo/loop.ts';
 import { SERVICES } from './services/index.ts';
 import { ROSTER } from './wallets.ts';
-import { NEAR, ROOM_MIN, accountUrl, bankRoom, view } from './near/chain.ts';
+import { FEATURES, NEAR, ROOM_MIN, accountUrl, bankRoom, has, view } from './near/chain.ts';
 import { registerSearch, searchOn } from './market.ts';
 import { accountOf } from './wallets.ts';
 import { attestationFile, warmTee } from './tee.ts';
@@ -30,7 +30,7 @@ if (!DRY && NEAR?.crew) {
   setInterval(tick, 30_000).unref();
 }
 // The board: screen every post waiting on the bank, then take it to auction or send its money back.
-if (!DRY && NEAR?.house) {
+if (!DRY && NEAR?.house && has('board')) {
   const tick = () => import('./board.ts').then((m) => m.screenPosted()).catch((e) => console.log('board:', String(e?.message ?? e).slice(0, 120)));
   setTimeout(tick, 5_000).unref();
   setInterval(tick, 30_000).unref();
@@ -47,7 +47,7 @@ app.get('/api/attestation/:hash', (c) => {
   return c.body(raw, 200, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=86400' });
 });
 // The open crew (RULES.md 28–31).
-app.get('/api/board', async (c) => c.json({ houseMax: HOUSE_MAX, limits: LIMITS, jobs: DRY ? [] : await boardView() }));
+app.get('/api/board', async (c) => c.json({ houseMax: HOUSE_MAX, limits: LIMITS, jobs: DRY || !has('board') ? [] : await boardView() }));
 // A brief's exact text, under the sha256 the bank holds.
 app.get('/api/board/brief/:hash', (c) => {
   const t = briefFile(c.req.param('hash'));
@@ -60,6 +60,7 @@ app.get('/api/board/screen/:id', (c) => {
 });
 app.post('/api/board/draft', async (c) => {
   if (DRY || !NEAR?.house) return c.json({ error: 'the board runs on chain only' }, 400);
+  if (!has('board')) return c.json({ error: 'This bank has no board.' }, 400);
   if ((await bankRoom()) < ROOM_MIN) return c.json({ error: 'The bank is out of room on chain for new jobs until it is topped up with NEAR. Try again later.' }, 503);
   const d = draft(await c.req.json().catch(() => ({})));
   if (!d.post) return c.json({ error: d.problems.join('; ') }, 400);
@@ -68,6 +69,7 @@ app.post('/api/board/draft', async (c) => {
 // No wallet: the house wallet posts a visitor's job from its balance, a few a day.
 const posted = { day: '', total: 0, byIp: new Map<string, number>() };
 app.post('/api/board/post', async (c) => {
+  if (!has('board')) return c.json({ error: 'This bank has no board.' }, 400);
   const b = await c.req.json().catch(() => ({}));
   const day = new Date().toISOString().slice(0, 10);
   if (posted.day !== day) Object.assign(posted, { day, total: 0, byIp: new Map() });
@@ -121,7 +123,8 @@ app.post('/api/crew/enlist', async (c) => {
 app.get('/api/info', (c) => c.json({
   mode: DRY ? 'demo' : NEAR?.network, model: MODEL, bank: NEAR?.bank ?? null, explorer: NEAR?.explorer ?? null,
   usdc: NEAR?.usdc ?? null, search: searchOn(), canned: DRY || CANNED, house: DRY ? null : demoPayer() || null,
-  faucet: !!NEAR?.usdcFaucet, crew: NEAR?.crew ?? null, board: !DRY && !!NEAR?.house,
+  faucet: !!NEAR?.usdcFaucet, crew: NEAR?.crew ?? null, board: !DRY && !!NEAR?.house && has('board'),
+  features: FEATURES.filter(has),
 }));
 app.get('/api/agent/:account', async (c) => {
   const account = c.req.param('account');

@@ -99,7 +99,7 @@ export async function treasuryRound(): Promise<string[]> {
     const usd = Math.floor(Math.min(n.usd, tools) * 1e6) / 1e6;
     if (usd <= 0) continue;
     try {
-      await call(NEAR.cfo, NEAR.bank, 'top_up', { agent: n.account, amount: toUnits(usd), reason: n.why }, { tgas: 60 });
+      await call(NEAR.cfo, NEAR.bank, 'top_up', { agent: n.account, amount: toUnits(usd), reason: n.why }, { tgas: 15 });
       tools -= usd;
       did.push(`topped up ${n.account} with ${usd} USDC for ${n.why}`);
     } catch (e: any) {
