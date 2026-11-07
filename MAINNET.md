@@ -1,6 +1,6 @@
 # Parallax on NEAR mainnet: the launch checklist
 
-The hackathon entry runs on testnet so anyone can try it with free test USDC. This file is how the same company goes live on mainnet with real USDC. Nothing here has been run on mainnet yet; every step that signs is yours.
+Parallax runs on testnet with free test USDC, and on mainnet with real USDC. This file is how the same company goes live on mainnet with real USDC. It was run on Nov 7, 2026: the bank is [`bank.useparallax.near`](https://nearblocks.io/address/bank.useparallax.near), and useparallax.xyz runs on it. Every step that signs is the owner's.
 
 ## What it costs
 
@@ -50,7 +50,7 @@ cd contracts/near && NET=mainnet ROOT=useparallax.near ./deploy.sh            # 
 
 It builds the lean bank, creates the accounts, deploys the bank with the mainnet policy and Circle's USDC (`17208628…36133a1`), registers the bank, contributors, compute and the root on USDC (the agents and the house keep their money as balances inside the bank), hires the 14 agents and the house wallet, and writes `deployments/near-mainnet.json`. The CFO, each agent and the house wallet end with a single function-call key on the bank, and each agent's and the house's full access is moved to your root key (with `SIGN=ledger`, pass your root's public key as `ROOT_PK=ed25519:…`). Re-running skips what already exists.
 
-The script was rehearsed end to end on testnet under `parallax-v2.testnet` on 4 Nov, and the lean build with the mainnet funding on 6 Nov.
+The script was rehearsed end to end on testnet under `parallax-v2.testnet` on 4 Nov, and the lean build with the mainnet funding on 6 Nov. It ran on mainnet for `useparallax.near` on 7 Nov, and the first $1 Flyers job was accepted that morning.
 
 **5. Fund the bank.** Send about 3 USDC from the root account into the bank. It lands in OPERATING; within five minutes the CFO opens the week, moves what the top-ups need into TOOLS and fills the house wallet.
 
@@ -129,4 +129,3 @@ near contract call-function as-transaction bank.useparallax.near owner_withdraw 
 - **Paying from another chain.** 1Click quotes are dry. 1Click can deliver straight into a job's escrow (recipient the bank, `customRecipientMsg: "job:<id>"`, which it sends as `ft_transfer_call`); that isn't built yet.
 - **The full Intel quote check.** `/proof` checks that each approved signer's TDX quote binds its key and that the report's hash is the one on the bank, but not Intel's signature chain on the quote itself. NEAR AI's own verifier, or `dcap-qvl`, does that.
 - **Gas per job.** A job is about 35 transactions (lots, sealed bids, reveals, awards, inspections, delivery, acceptance), roughly 0.02–0.05 NEAR, which agents and the CFO pay. On $1 jobs that matters; a relayer for the bid transactions, or fewer lots on cheap jobs, would cut it. With the lean funding, each agent's 0.02 NEAR covers its gas for about ten jobs it wins.
-- **The docs describe testnet.** The site's network labels and footer links follow the deployment, but the docs pages name the testnet accounts.

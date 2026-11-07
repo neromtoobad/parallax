@@ -44,7 +44,7 @@ async function run(job: Job, input: Record<string, string>) {
 }
 
 /** The flyer as SVG: picture on top, words below. Square puts them side by side. */
-function layout(c: Copy, contact: string, a: { palette: Palette; font: string; image: string }, w: number, h: number) {
+export function layout(c: Copy, contact: string, a: { palette: Palette; font: string; image: string }, w: number, h: number) {
   const p = a.palette, square = w === h, pad = Math.round(w * 0.07);
   const img = square ? { x: 0, y: 0, w: w * 0.5, h } : { x: pad, y: pad, w: w - pad * 2, h: h * 0.48 };
   const tx = square ? w * 0.5 + pad : pad, tw = square ? w * 0.5 - pad * 2 : w - pad * 2;
@@ -54,9 +54,14 @@ function layout(c: Copy, contact: string, a: { palette: Palette; font: string; i
   const parts: string[] = [];
   for (const line of words) { parts.push(`<text x="${tx}" y="${y}" class="h" font-size="${size}">${esc(line)}</text>`); y += size * 1.02; }
   y += size * 0.35;
-  parts.push(`<text x="${tx}" y="${y}" class="s" font-size="${size * 0.36}">${esc(c.sub)}</text>`); y += size * 0.8;
-  for (const l of c.lines.slice(0, 3)) { parts.push(`<text x="${tx}" y="${y}" class="b" font-size="${size * 0.3}">${esc(l)}</text>`); y += size * 0.46; }
+  // Inter is about 0.55 em a character, so the tagline and the details wrap to the text column like the headline does
+  for (const line of wrap(c.sub, Math.floor(tw / (size * 0.36 * 0.55))).slice(0, 3)) { parts.push(`<text x="${tx}" y="${y}" class="s" font-size="${size * 0.36}">${esc(line)}</text>`); y += size * 0.46; }
+  y += size * 0.34;
+  for (const l of c.lines.slice(0, 3)) for (const line of wrap(l, Math.floor(tw / (size * 0.3 * 0.55))).slice(0, 2)) { parts.push(`<text x="${tx}" y="${y}" class="b" font-size="${size * 0.3}">${esc(line)}</text>`); y += size * 0.46; }
   const by = h - pad - size * 0.9, bw = Math.min(tw, c.cta.length * size * 0.24 + size * 0.9);
+  // the contact sits beside the button when it fits in the column, otherwise just above it
+  const beside = bw + size * 0.3 + contact.length * size * 0.24 * 0.55 <= tw;
+  const cx = beside ? tx + bw + size * 0.3 : tx, cy = beside ? by + size * 0.5 : by - size * 0.3;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">
 <style>@import url('https://fonts.googleapis.com/css2?family=${a.font.replace(/ /g, '+')}:wght@700&amp;family=Inter:wght@500;600&amp;display=swap');
 .h{font-family:'${a.font}',serif;font-weight:700;fill:${p.ink};letter-spacing:-.02em}.s{font-family:Inter,sans-serif;font-weight:600;fill:${p.accent}}.b{font-family:Inter,sans-serif;font-weight:500;fill:${p.ink}}</style>
@@ -66,7 +71,7 @@ function layout(c: Copy, contact: string, a: { palette: Palette; font: string; i
 ${parts.join('\n')}
 <rect x="${tx}" y="${by}" width="${bw}" height="${size * 0.78}" rx="${size * 0.39}" fill="${p.accent}"/>
 <text x="${tx + bw / 2}" y="${by + size * 0.5}" text-anchor="middle" class="s" style="fill:#fff" font-size="${size * 0.3}">${esc(c.cta)}</text>
-<text x="${tx + bw + size * 0.3}" y="${by + size * 0.5}" class="b" font-size="${size * 0.24}">${esc(contact)}</text>
+<text x="${cx}" y="${cy}" class="b" font-size="${size * 0.24}">${esc(contact)}</text>
 </svg>`;
 }
 
