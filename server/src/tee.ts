@@ -9,7 +9,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { DATA_DIR, DRY, IMAGE_MODEL, MODEL } from './config.ts';
+import { ARCHIVE_DIRS, DATA_DIR, DRY, IMAGE_MODEL, MODEL } from './config.ts';
 import { NEARAI, nearaiKey } from './nearai.ts';
 import { NEAR, call, sha256, view } from './near/chain.ts';
 import { signerOf } from '../../web/src/ecrecover.ts';
@@ -46,7 +46,7 @@ export async function teeSignature(id: string, model: string, request: string, a
 /** A saved attestation report by its sha256: the exact bytes whose hash the bank holds. */
 export function attestationFile(hash: string): string | undefined {
   if (!/^[0-9a-f]{64}$/.test(hash)) return undefined;
-  for (const d of [dir(), new URL('../../deployments/attestations', import.meta.url).pathname]) {
+  for (const d of [dir(), ...ARCHIVE_DIRS.map((a) => join(a, 'attestations')), new URL('../../deployments/attestations', import.meta.url).pathname]) {
     const f = join(d, `${hash}.json`);
     if (existsSync(f)) return readFileSync(f, 'utf8');
   }

@@ -10,7 +10,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { DATA_DIR, DRY } from './config.ts';
+import { ARCHIVE_DIRS, DATA_DIR, DRY } from './config.ts';
 import { Job } from './job.ts';
 import { NEARAI_HOST } from './nearai.ts';
 import { NEAR, ROOM_MIN, bankRoom, call, canSign, fromUnits, sha256, tg, toUnits, view } from './near/chain.ts';
@@ -33,7 +33,7 @@ type Posted = { id: string; customer: string; amount: string; spec_hash: string;
 
 const dir = (...p: string[]) => join(DATA_DIR, 'board', ...p);
 const repo = (...p: string[]) => join(new URL('../../deployments/board', import.meta.url).pathname, ...p);
-const read = (...p: string[]) => [dir(...p), repo(...p)].find(existsSync);
+const read = (...p: string[]) => [dir(...p), ...ARCHIVE_DIRS.map((a) => join(a, 'board', ...p)), repo(...p)].find(existsSync);
 
 /** The brief's exact bytes, by the hash the bank holds (the board's copy first, then the repository's). */
 export function briefFile(hash: string): string | undefined {

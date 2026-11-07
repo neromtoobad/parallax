@@ -12,7 +12,7 @@
 // part of the job (tools.ts). The inspector and its reputation do the rest: fails push it onto probation.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DATA_DIR, DRY } from './config.ts';
+import { ARCHIVE_DIRS, DATA_DIR, DRY } from './config.ts';
 import { Job } from './job.ts';
 import { NEARAI_HOST } from './nearai.ts';
 import { NEAR, call, canSign, fromUnits, sha256, tg, toUnits, view } from './near/chain.ts';
@@ -101,7 +101,7 @@ export function saveSpec(s: Spec): string {
 /** The stored spec's exact bytes (their sha256 is what the bank holds), from DATA_DIR or the repo copy. */
 export function specFile(hash: string): string | undefined {
   if (!/^[0-9a-f]{64}$/.test(hash)) return undefined;
-  for (const d of [dir(), new URL('../../deployments/crew', import.meta.url).pathname]) {
+  for (const d of [dir(), ...ARCHIVE_DIRS.map((a) => join(a, 'crew')), new URL('../../deployments/crew', import.meta.url).pathname]) {
     const f = join(d, `${hash}.json`);
     if (existsSync(f)) return readFileSync(f, 'utf8');
   }
@@ -112,7 +112,7 @@ export const agentId = (slug: string) => `${slug}.${NEAR?.crew}`;
 
 export function reviewOf(agent: string): Review | undefined {
   if (!/^[a-z0-9._-]{2,64}$/.test(agent)) return undefined;
-  for (const f of [file('reviews', `${agent}.json`), join(new URL('../../deployments/crew/reviews', import.meta.url).pathname, `${agent}.json`)])
+  for (const f of [file('reviews', `${agent}.json`), ...ARCHIVE_DIRS.map((a) => join(a, 'crew', 'reviews', `${agent}.json`)), join(new URL('../../deployments/crew/reviews', import.meta.url).pathname, `${agent}.json`)])
     if (existsSync(f)) return JSON.parse(readFileSync(f, 'utf8'));
   return undefined;
 }
