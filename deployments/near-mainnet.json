@@ -1,0 +1,29 @@
+{
+  "network": "mainnet",
+  "rpc": "https://free.rpc.fastnear.com",
+  "rpcFallbacks": [
+    "https://rpc.mainnet.near.org"
+  ],
+  "explorer": "https://nearblocks.io",
+  "owner": "useparallax.near",
+  "bank": "bank.useparallax.near",
+  "usdc": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+  "usdcFaucet": false,
+  "cfo": "cfo.useparallax.near",
+  "contributors": "contributors.useparallax.near",
+  "team": {
+    "scout": "scout.team.useparallax.near",
+    "researcher": "researcher.team.useparallax.near",
+    "writer": "writer.team.useparallax.near",
+    "illustrator": "illustrator.team.useparallax.near",
+    "reader": "reader.team.useparallax.near",
+    "analyst": "analyst.team.useparallax.near",
+    "messenger": "messenger.team.useparallax.near",
+    "auditor": "auditor.team.useparallax.near",
+    "producer": "producer.team.useparallax.near",
+    "investigator": "investigator.team.useparallax.near"
+  },
+  "compute": "compute.useparallax.near",
+  "house": "house.useparallax.near",
+  "features": []
+}
