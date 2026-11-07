@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
+import { api } from './api.ts';
 import { Face } from './parts.tsx';
-import { load, NET, units, verify, type Check, type Proof, type Raw, type Round } from './proof.ts';
+import { load, NET, setNet, units, verify, type Check, type Proof, type Raw, type Round } from './proof.ts';
 import { nameOf } from './team.ts';
 
 const host = (u: string) => new URL(u).host;
@@ -11,7 +12,7 @@ export function ProofPage() {
   const [tamper, setTamper] = useState(false);
   const [status, setStatus] = useState('Starting');
   const [err, setErr] = useState('');
-  const run = () => { setRaw(undefined); setProof(undefined); setErr(''); load(setStatus).then(setRaw).catch((e) => setErr(e.message)); };
+  const run = () => { setRaw(undefined); setProof(undefined); setErr(''); api.info().then(setNet, () => {}).then(() => load(setStatus)).then(setRaw).catch((e) => setErr(e.message)); };
   useEffect(run, []);
   useEffect(() => { if (raw) verify(raw, tamper).then(setProof); }, [raw, tamper]);
 
@@ -20,7 +21,7 @@ export function ProofPage() {
     <div className="wrap proof">
       <div className="jobhead">
         <div>
-          <span className="mono k">Proof · NEAR testnet</span>
+          <span className="mono k">Proof · NEAR {NET.index.includes('main') ? 'mainnet' : 'testnet'}</span>
           <h1 style={{ marginTop: 10 }}>Don't take our word for it.</h1>
           <p className="sub" style={{ marginTop: 14 }}>
             None of these checks ask our server anything. Your browser reads the bank contract and every transaction it

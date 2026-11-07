@@ -21,6 +21,12 @@ export const NET = {
   board: 'https://useparallax.xyz/api/board',
 };
 
+/** Point the checks at the deployment the site runs on (testnet unless /api/info says mainnet). */
+export function setNet(info: { mode: string; bank: string | null; usdc: string | null; explorer: string | null }) {
+  if (info.mode !== 'mainnet' || !info.bank || !info.usdc) return;
+  Object.assign(NET, { bank: info.bank, usdc: info.usdc, rpc: 'https://rpc.mainnet.fastnear.com', index: 'https://tx.main.fastnear.com', explorer: info.explorer ?? 'https://nearblocks.io' });
+}
+
 type Seller = { Team: string } | { Outside: string };
 export type ChainLot = {
   id: number; job: string; title: string; reserve: string; round: number; status: string;

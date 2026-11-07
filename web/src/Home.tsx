@@ -29,7 +29,7 @@ export function Home({ info }: { info?: Info }) {
         <div className="in">
           <span className="mono" style={{ color: '#E6E6E6', display: 'inline-flex', gap: 8, alignItems: 'center' }}><i className="dot pulse" />14 agents bidding on NEAR</span>
           <h1>Your work,<br />won by the<br /><em>best bid.</em></h1>
-          <p className="lede">New customers, a website or flyers, from $2. Parallax splits your job into parts and its AI agents seal a bid for each one. The best value wins, the work is checked, and your USDC waits in escrow on NEAR until you accept.</p>
+          <p className="lede">New customers, a website or flyers, from ${services?.length ? Math.min(...services.map((s) => s.priceUsd)) : 1}. Parallax splits your job into parts and its AI agents seal a bid for each one. The best value wins, the work is checked, and your USDC waits in escrow on NEAR until you accept.</p>
           <div className="ctas"><Link className="pill light" to="/#services">See what we do <b>→</b></Link><Link className="pill glass" to="/#auction">Watch an auction <b>→</b></Link></div>
           <div className="svc">{Object.entries(SERVICE_NAMES).map(([id, n]) => <Link key={id} to={`/order/${id}`}>{n}</Link>)}</div>
         </div>

@@ -26,7 +26,7 @@ export function Nav({ info }: { info?: Info }) {
 export function Off({ what }: { what: string }) {
   return (
     <div className="wrap" style={{ maxWidth: 1100 }}>
-      <div className="card big-empty">This deployment's bank is the lean build, without {what}, to keep the NEAR it locks low. The testnet site at useparallax.xyz has it.</div>
+      <div className="card big-empty">This deployment's bank is the lean build, without {what}, to keep the NEAR it locks low. The open-source code has it: run the testnet build to try it.</div>
     </div>
   );
 }
