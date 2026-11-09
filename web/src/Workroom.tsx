@@ -39,6 +39,9 @@ const WALK = ['walk1', 'walk2', 'walk3', 'walk4'] as const;
 const BOARD = 557;              // the middle of the auction board; people in the hall turn to it
 const COUNTER = { x: 440, y: 996, past: 652 }; // behind the counter, and the gap at its right end
 const HALL = [470, 640, 390, 720, 310, 800, 230, 880];
+// Lots bid at once on a live job, so the hall can hold more bidders than its eight spots: the rest stand between.
+const HALL_MORE = [430, 680, 350, 760, 270, 840, 555, 600, 510];
+const hallX = (i: number) => (i < HALL.length ? HALL[i] : HALL_MORE[(i - HALL.length) % HALL_MORE.length]);
 // The whole team sits facing out behind two long desks, a raised back row of eight and a front row of six. Each
 // desk front is its own layer (design/scripts/desks.py), drawn over the row seated behind it. People walk along
 // behind their desk at `walk`, step out past its right end at `exit`, and a seated sprite stands at `sit` so the
@@ -122,7 +125,10 @@ function fold(beats: Beat[]): Scene {
         break;
       case 'commit': {
         const taken = new Set(Object.values(s.place).filter((p) => typeof p === 'object').map((p) => (p as { hall: number }).hall));
-        s.place[b.who] = { hall: HALL.findIndex((_, i) => !taken.has(i)) % HALL.length };
+        // the first free spot; with every spot taken (four lots bidding at once) the next one along, never -1
+        let spot = 0;
+        while (taken.has(spot)) spot++;
+        s.place[b.who] = { hall: spot };
         s.pose[b.who] = 'bid';
         s.tag[b.who] = 'sealed';
         s.board?.rows.push({ who: b.who });
@@ -203,7 +209,7 @@ const rowAt = (p: Pt) => (p.floor === 1 ? (['back', 'front'] as Row[]).find((r) 
 
 function goalOf(id: string, p: Place): Goal {
   if (p === 'street') return { x: COUNTER.x, y: COUNTER.y, floor: 2 };
-  if (typeof p === 'object') return { x: HALL[p.hall], y: FLOOR[0], floor: 0 };
+  if (typeof p === 'object') return { x: hallX(Math.max(0, p.hall)), y: FLOOR[0], floor: 0 };
   const seat = SEATS[id] ?? { row: 'front', x: 860 };
   return { x: seat.x, y: ROWS[seat.row].walk, floor: 1, sit: true, row: seat.row };
 }
@@ -310,6 +316,7 @@ class Crowd {
 
   private step(b: Body, dt: number) {
     b.stepped = false;
+    if (!Number.isFinite(b.x) || !Number.isFinite(b.y)) { Object.assign(b, { x: b.goal.x, y: b.goal.y, floor: b.goal.floor, path: [], ride: undefined }); }
     const r = b.ride;
     if (r?.on) { b.x = LIFT.x + SLOTS[r.slot]; b.y = this.car.y; b.floor = this.car.floor; b.face = -1; return; }
     if (r?.board) { if (this.shuffle(b, LIFT.x + SLOTS[r.slot], dt)) { r.board = false; r.on = true; } return; }
@@ -545,7 +552,7 @@ export function Workroom({ o, lots, steps, live }: { o: Order; lots: LiveLot[]; 
           {live && !caughtUp ? <span className="chip mono"><i className="dot pulse" />catching up</span>
             : live && !['accepted', 'rejected', 'failed'].includes(o.state) ? <span className="chip mono"><i className="dot pulse" />live</span>
             : <span className="chip mono">replay</span>}
-          <span className="mono note">{played.length}/{beats.length}</span>
+          <span className="mono note">{Math.min(played.filter((k) => byKey.has(k)).length, beats.length)}/{beats.length}</span>
         </div>
         <p className="now">{scene.caption}</p>
         <ol className="wr-log">{scene.log.slice(-7, -1).reverse().map((c, i) => <li key={scene.log.length - i}>{c}</li>)}</ol>

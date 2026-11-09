@@ -282,8 +282,8 @@ export async function closeLots(orderId: string, lots: LotRecord[], job: Job | a
           const deliverable = tee.length ? boundPart(l.id, round, tee.map((t) => t.text.split(':').pop()!), part) : part;
           // A deliver burns ~3 Tgas with one signature (~0.5 more per extra one), but the signer must hold the whole
           // prepaid gas up front: on mainnet an agent keeps ~0.03 NEAR, so 24 + 5 per signature (34 Tgas with two)
-          // was refused before it ran (job d86c1fd3a1). Mainnet prepays 8 + 1.5 per signature, at most 26.
-          await act(l.winner!, 'deliver', { lot: l.id, deliverable, tee, ...(tee.length ? { body: part } : {}) }, { tgas: tg(Math.ceil(8 + 1.5 * tee.length), 24 + 5 * tee.length) });
+          // was refused before it ran (job d86c1fd3a1). Mainnet prepays 8 + 1.5 per signature, at most 20.
+          await act(l.winner!, 'deliver', { lot: l.id, deliverable, tee, ...(tee.length ? { body: part } : {}) }, { tgas: tg(Math.min(20, Math.ceil(8 + 1.5 * tee.length)), 24 + 5 * tee.length) });
         }
         const r = await call(NEAR!.cfo, NEAR!.bank, 'inspect', { lot: l.id, pass, note });
         l.tx = r.hash;
