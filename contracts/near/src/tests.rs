@@ -363,7 +363,7 @@ fn rule_21_a_failed_lot_goes_back_up_without_the_seller() {
     at("anyone.testnet", 41);
     s.award(lot);
     at("writer.testnet", 50);
-    s.deliver(lot, "draft".into(), None);
+    s.deliver(lot, "draft".into(), None, None);
     at("cfo.testnet", 60);
     s.inspect(lot, false, "missed the brief".into());
     let l = s.get_lot(lot).unwrap();
@@ -384,7 +384,7 @@ fn rule_13_acceptance_pays_winners_contributors_and_the_company() {
     at("anyone.testnet", 41);
     s.award(lot);
     at("writer.testnet", 50);
-    s.deliver(lot, "draft".into(), None);
+    s.deliver(lot, "draft".into(), None, None);
     at("cfo.testnet", 60);
     s.inspect(lot, true, "good".into());
     s.submit_job("j1".into(), "files".into());
@@ -528,7 +528,7 @@ fn rule_21_a_pass_raises_the_winners_record() {
     at("anyone.testnet", 41);
     s.award(lot);
     at("writer.testnet", 50);
-    s.deliver(lot, "draft".into(), None);
+    s.deliver(lot, "draft".into(), None, None);
     at("cfo.testnet", 60);
     s.inspect(lot, true, "good".into());
     let a = s.get_agent(acc("writer.testnet")).unwrap();
@@ -548,7 +548,7 @@ fn rule_22_a_rejected_job_pays_no_agent() {
     at("anyone.testnet", 41);
     s.award(lot);
     at("writer.testnet", 50);
-    s.deliver(lot, "draft".into(), None);
+    s.deliver(lot, "draft".into(), None, None);
     at("cfo.testnet", 60);
     s.inspect(lot, true, "good".into());
     s.submit_job("j1".into(), "files".into());
@@ -583,6 +583,12 @@ fn won(s: &mut Parallax) -> u64 {
     at("anyone.testnet", 41);
     s.award(lot);
     lot
+}
+
+/// The hash a signed delivery files for `body` (rule 39): bound to the lot, its round and the answer TEE_TEXT signed.
+fn bound(s: &Parallax, lot: u64, body: &str) -> String {
+    let answer = TEE_TEXT.rsplit(':').next().unwrap();
+    bound_part(lot, s.get_lot(lot).unwrap().round, &[answer], body)
 }
 
 fn sig() -> Option<Vec<TeeSig>> {
@@ -694,7 +700,7 @@ fn rule_26_team_work_signed_by_an_approved_tee_key_is_taken() {
     s.approve_signer(TEE_ADDR.to_uppercase().replace("0X", "0x"), TEE_MODEL.into(), REPORT.into());
     let lot = won(&mut s);
     at("writer.testnet", 50);
-    s.deliver(lot, "draft".into(), sig());
+    s.deliver(lot, bound(&s, lot, "draft"), sig(), Some("draft".into()));
     assert_eq!(s.get_lot(lot).unwrap().status, LotStatus::Submitted);
     assert!(get_logs().iter().any(|l| l.contains(TEE_ADDR)));
 }
@@ -705,7 +711,7 @@ fn rule_26_work_signed_by_an_unknown_key_is_refused() {
     let mut s = setup();
     let lot = won(&mut s);
     at("writer.testnet", 50);
-    s.deliver(lot, "draft".into(), sig());
+    s.deliver(lot, bound(&s, lot, "draft"), sig(), Some("draft".into()));
 }
 
 #[test]
@@ -717,7 +723,7 @@ fn rule_26_a_tampered_answer_is_refused() {
     let lot = won(&mut s);
     at("writer.testnet", 50);
     let forged = TEE_TEXT.replace(":f36de2", ":f36de3");
-    s.deliver(lot, "draft".into(), Some(vec![TeeSig { text: forged, signature: TEE_SIG.into() }]));
+    s.deliver(lot, "draft".into(), Some(vec![TeeSig { text: forged, signature: TEE_SIG.into() }]), None);
 }
 
 #[test]
@@ -728,7 +734,7 @@ fn rule_26_a_signer_counts_only_for_its_own_model() {
     s.approve_signer(TEE_ADDR.into(), "Qwen/Qwen3-30B".into(), REPORT.into());
     let lot = won(&mut s);
     at("writer.testnet", 50);
-    s.deliver(lot, "draft".into(), sig());
+    s.deliver(lot, bound(&s, lot, "draft"), sig(), Some("draft".into()));
 }
 
 #[test]
@@ -741,7 +747,7 @@ fn rule_26_a_revoked_signer_no_longer_counts() {
     s.revoke_signer(TEE_ADDR.into());
     let lot = won(&mut s);
     at("writer.testnet", 50);
-    s.deliver(lot, "draft".into(), sig());
+    s.deliver(lot, bound(&s, lot, "draft"), sig(), Some("draft".into()));
 }
 
 #[test]
@@ -754,7 +760,7 @@ fn rule_26_with_require_tee_unsigned_work_is_refused() {
     s.set_policy(p);
     let lot = won(&mut s);
     at("writer.testnet", 50);
-    s.deliver(lot, "draft".into(), None);
+    s.deliver(lot, "draft".into(), None, None);
 }
 
 #[test]
@@ -946,7 +952,7 @@ fn rule_29_a_passed_agent_bids_wins_and_earns_like_the_team() {
     s.award(lot);
     assert_eq!(s.get_lot(lot).unwrap().winner, Some(Seller::Team(acc(NIA))));
     at("crew.testnet", 50);
-    s.crew_deliver(acc(NIA), lot, "draft".into(), sig());
+    s.crew_deliver(acc(NIA), lot, bound(&s, lot, "draft"), sig(), Some("draft".into()));
     at("cfo.testnet", 60);
     s.inspect(lot, true, "good".into());
     s.submit_job("j1".into(), "files".into());
@@ -1174,7 +1180,7 @@ fn rule_34_a_taken_job_is_auctioned_and_paid_like_any_job() {
     at("anyone.testnet", 51);
     s.award(lot);
     at("writer.testnet", 60);
-    s.deliver(lot, "report".into(), sig());
+    s.deliver(lot, bound(&s, lot, "report"), sig(), Some("report".into()));
     at("cfo.testnet", 70);
     s.inspect(lot, true, "good".into());
     s.submit_job("bb01".into(), "files".into());
@@ -1312,7 +1318,7 @@ fn rule_36_the_winner_gets_its_bond_back_when_its_work_passes() {
     at("anyone.testnet", 41);
     s.award(lot);
     at("writer.testnet", 50);
-    s.deliver(lot, "draft".into(), None);
+    s.deliver(lot, "draft".into(), None, None);
     at("cfo.testnet", 60);
     s.inspect(lot, true, "good".into());
     assert_eq!(s.balance_of(acc("writer.testnet")).0, D);
@@ -1327,7 +1333,7 @@ fn rule_36_failed_work_pays_the_bond_to_the_customer() {
     at("anyone.testnet", 41);
     s.award(lot);
     at("writer.testnet", 50);
-    s.deliver(lot, "draft".into(), None);
+    s.deliver(lot, "draft".into(), None, None);
     at("cfo.testnet", 60);
     s.inspect(lot, false, "missed the brief".into());
     assert_eq!(s.balance_of(acc("writer.testnet")).0, D - 60_000);
@@ -1351,7 +1357,7 @@ fn nia_fails(s: &mut Parallax, job: &str, t: u64) {
     at("anyone.testnet", t + 41);
     s.award(lot);
     at("crew.testnet", t + 50);
-    s.crew_deliver(acc(NIA), lot, "draft".into(), None);
+    s.crew_deliver(acc(NIA), lot, "draft".into(), None, None);
     at("cfo.testnet", t + 60);
     s.inspect(lot, false, "missed the brief".into());
 }
@@ -1387,7 +1393,7 @@ fn rule_37_hired_agents_are_not_struck_off() {
         at("anyone.testnet", t + 41);
         s.award(lot);
         at("writer.testnet", t + 50);
-        s.deliver(lot, "draft".into(), None);
+        s.deliver(lot, "draft".into(), None, None);
         at("cfo.testnet", t + 60);
         s.inspect(lot, false, "missed the brief".into());
     }
@@ -1470,7 +1476,7 @@ fn rule_38_accepting_a_sub_job_pays_another_agent() {
     at("anyone.testnet", 91);
     s.award(sl);
     at("scout.testnet", 95);
-    s.deliver(sl, "notes".into(), None);
+    s.deliver(sl, "notes".into(), None, None);
     at("cfo.testnet", 100);
     s.inspect(sl, true, "useful".into());
     s.submit_job("sub1".into(), "notes".into());
@@ -1524,4 +1530,71 @@ fn lean_a_bank_without_the_board_refuses_a_post() {
 fn lean_a_bank_without_the_crew_refuses_a_stake() {
     let mut s = setup();
     deposit(&mut s, "sponsor.near", 250_000, r#"enlist:{"slug":"marlo","role":"writer","name":"Marlo","spec":"aa"}"#);
+}
+
+// ------------------------------------------------------------------ rule 39: signed work is bound to its lot
+
+fn approved(s: &mut Parallax) {
+    at("cfo.testnet", 0);
+    s.approve_signer(TEE_ADDR.into(), TEE_MODEL.into(), REPORT.into());
+}
+
+#[test]
+#[should_panic(expected = "isn't bound to this lot and its signed answers")]
+fn rule_39_a_signed_delivery_must_file_the_bound_hash() {
+    let mut s = setup();
+    approved(&mut s);
+    let lot = won(&mut s);
+    at("writer.testnet", 50);
+    s.deliver(lot, "draft".into(), sig(), Some("draft".into()));
+}
+
+#[test]
+#[should_panic(expected = "signed work must name the hash of its part")]
+fn rule_39_a_signed_delivery_must_name_its_part() {
+    let mut s = setup();
+    approved(&mut s);
+    let lot = won(&mut s);
+    at("writer.testnet", 50);
+    let h = bound(&s, lot, "draft");
+    s.deliver(lot, h, sig(), None);
+}
+
+#[test]
+#[should_panic(expected = "isn't bound to this lot and its signed answers")]
+fn rule_39_a_hash_bound_to_another_lot_is_refused() {
+    let mut s = setup();
+    approved(&mut s);
+    let lot = won(&mut s);
+    at("writer.testnet", 50);
+    let other = bound_part(lot + 1, 1, &[TEE_TEXT.rsplit(':').next().unwrap()], "draft");
+    s.deliver(lot, other, sig(), Some("draft".into()));
+}
+
+#[test]
+#[should_panic(expected = "a signed answer was already filed for other work")]
+fn rule_39_one_signed_answer_pays_for_one_delivery() {
+    let mut s = setup();
+    approved(&mut s);
+    let first = won(&mut s);
+    at("writer.testnet", 50);
+    s.deliver(first, bound(&s, first, "draft"), sig(), Some("draft".into()));
+    funded(&mut s, "j2");
+    at("cfo.testnet", 100);
+    let second = s.open_lot("j2".into(), "edit".into(), vec![], U128(D));
+    bid(&mut s, second, "writer.testnet", 300_000, 101);
+    reveal(&mut s, second, "writer.testnet", 300_000, 121);
+    at("anyone.testnet", 141);
+    s.award(second);
+    at("writer.testnet", 150);
+    s.deliver(second, bound(&s, second, "draft"), sig(), Some("draft".into()));
+}
+
+#[test]
+fn rule_39_unsigned_work_needs_no_binding_while_tee_is_optional() {
+    let mut s = setup();
+    let lot = won(&mut s);
+    at("writer.testnet", 50);
+    s.deliver(lot, "draft".into(), None, None);
+    assert_eq!(s.get_lot(lot).unwrap().status, LotStatus::Submitted);
 }

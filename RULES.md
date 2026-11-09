@@ -72,6 +72,11 @@ The `parallax` contract on NEAR ([contracts/near/src/lib.rs](contracts/near/src/
     - The report holds an Intel TDX quote whose report data is the key's address and a fresh nonce, plus NVIDIA's GPU evidence.
     - `/proof` fetches each report, matches it to the hash on the bank, and checks that binding again.
     - Either of them can revoke a key.
+39. **Signed work is bound to its lot.** A delivery that carries signatures files `sha256("parallax-part:<lot>:<round>:<answer hashes, comma-joined>:<part>")`, where the part is the hash of the winner's steps and receipt for the job, and names that part (`body`).
+    - The bank computes the same hash from the lot, its current round and the answer hash at the end of each signed text, and refuses the delivery if it differs. A signed answer can't be moved to another lot or another round.
+    - The bank keeps every signed answer it has taken (the first 16 bytes of the sha256 of its signed text) and refuses one filed a second time, so one model call can't pay for two pieces of work.
+    - Each team agent prices its own sealed bid with a model call of its own (`server/src/pricer.ts`): it is told its cost, the reserve, its record, its temperament and how its last bids went, and answers with a markup held to 5–80% over cost and never above the reserve. That call is TEE-signed and billed to the agent, win or lose. The reason is shown only after the reveal.
+    - `/proof` rebuilds each bound hash and checks no signed answer was filed twice, from the block of the bank's `rules` event with `bound_work`.
 
 ## The open crew
 

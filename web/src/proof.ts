@@ -413,6 +413,7 @@ export async function verify(raw: Raw, tamper = false): Promise<Proof> {
   checks.push(...(await boardChecks(calls, raw, approved)));
   // 9. Bonds: each revealed bid locks its share, and each bond comes back or pays the customer.
   checks.push(...bondChecks(calls, raw));
+  checks.push(...(await boundChecks(calls)));
   const all = [...checks, ...jobs.flatMap((j) => [...j.rounds.flatMap((r) => r.checks), ...j.checks])];
   return { jobs, checks, total: all.length, passed: all.filter((c) => c.ok).length, txs: raw.calls.length };
 }
@@ -497,6 +498,45 @@ async function boardChecks(calls: Call[], raw: Raw, approved: Map<string, Signer
       out.push({ ok: moved, what: `${who} money back`, detail: moved ? `${units(amt)} went back to ${to}` : `no refund to ${to} in that transaction`, tx: e.call.tx });
     }
   }
+  return out;
+}
+
+/**
+ * Rule 39, from the block where the bank says signed work is bound (its `rules` event with bound_work): each
+ * signed delivery filed sha256("parallax-part:<lot>:<round>:<answer hashes>:<part>") for its own lot, and no
+ * signed answer was filed twice. The round is the lot's round on the bank at the time: 1, plus one for every
+ * reopen before the delivery.
+ */
+async function boundChecks(calls: Call[]): Promise<Check[]> {
+  const out: Check[] = [];
+  let from: number | undefined;
+  const round = new Map<number, number>(), seen = new Map<string, string>();
+  let n = 0;
+  for (const c of calls) {
+    for (const e of c.events) {
+      if (e.event === 'rules' && e.data.bound_work) from ??= e.block;
+      if (e.event === 'lot') round.set(Number(e.data.id ?? e.data.lot), 1);
+      if ((e.event === 'reopen' || e.event === 'fail') && e.data.round !== undefined) round.set(Number(e.data.lot), Number(e.data.round));
+    }
+    if (from === undefined || c.block < from || (c.method !== 'deliver' && c.method !== 'crew_deliver')) continue;
+    const sigs: { text: string }[] = c.args.tee ?? [];
+    if (!sigs.length || !c.events.some((e) => e.event === 'deliver')) continue;
+    n++;
+    const lot = Number(c.args.lot), r = round.get(lot) ?? 1;
+    const want = c.args.body === undefined ? undefined : await sha256(`parallax-part:${lot}:${r}:${sigs.map((t) => t.text.split(':').pop()).join(',')}:${c.args.body}`);
+    out.push({
+      ok: want === c.args.deliverable, what: 'Bound work',
+      detail: want === undefined ? `lot ${lot}: signed work filed without naming its part`
+        : `lot ${lot}, round ${r}: sha256 of the lot, round, ${sigs.length} signed ${sigs.length === 1 ? 'answer' : 'answers'} and part ${String(c.args.body).slice(0, 12)}… is ${want.slice(0, 16)}…, ${want === c.args.deliverable ? 'the hash it filed' : `not the ${String(c.args.deliverable).slice(0, 16)}… it filed`}`,
+      tx: c.tx,
+    });
+    for (const t of sigs) {
+      const before = seen.get(t.text);
+      if (before) out.push({ ok: false, what: 'Answer reused', detail: `lot ${lot} filed a signed answer already filed in ${before.slice(0, 10)}…`, tx: c.tx });
+      seen.set(t.text, c.tx);
+    }
+  }
+  if (from !== undefined && n) out.push({ ok: true, what: 'Answers used once', detail: `${seen.size} signed answers across ${n} signed deliveries since rule 39, each filed once` });
   return out;
 }
 

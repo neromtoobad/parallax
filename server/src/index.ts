@@ -8,7 +8,8 @@ import { streamSSE } from 'hono/streaming';
 import { relative } from 'node:path';
 import { CANNED, DRY, MODEL, PORT, WEB_DIR } from './config.ts';
 import { backlog, bus, type Event } from './bus.ts';
-import { accept, demoPayer, fund, getOrder, listOrders, quote, rejected, sitePath, type Order } from './orders.ts';
+import { accept, demoPayer, fund, getOrder, listOrders, payFromChain, quote, rejected, resumeDeposits, sitePath, type Order } from './orders.ts';
+import { payAssets, submitDeposit } from './oneclick.ts';
 import { startTreasury } from './cfo/loop.ts';
 import { SERVICES } from './services/index.ts';
 import { ROSTER } from './wallets.ts';
@@ -22,6 +23,7 @@ import { HOUSE_STAKE, MIN_STAKE, agentId, crew, crewView, enlistForVisitor, pars
 
 registerSearch();
 startTreasury();
+resumeDeposits();
 void warmTee();
 // The crew: keep the roster fresh (lots read enlisted agents' specs from it) and review whoever is waiting.
 if (!DRY && NEAR?.crew) {
@@ -181,6 +183,20 @@ app.post('/api/orders/:id/pay', async (c) => {
     if (no) return c.json({ error: no }, 429);
   }
   try { return c.json(view_(await fund(o, demoWallet))); } catch (e: any) { return c.json({ error: String(e?.message ?? e) }, 400); }
+});
+// Pay from another chain (NEAR Intents, mainnet only): the tokens on offer, then a deposit address for one job.
+app.get('/api/pay/assets', async (c) => {
+  if (NEAR?.network !== 'mainnet') return c.json([]);
+  try { return c.json(await payAssets()); } catch (e: any) { return c.json({ error: String(e?.message ?? e) }, 502); }
+});
+app.post('/api/orders/:id/intents', async (c) => {
+  const o = getOrder(c.req.param('id'));
+  if (!o) return c.json({ error: 'not found' }, 404);
+  const b = await c.req.json().catch(() => ({}));
+  try {
+    if (b.txHash && o.intents) { await submitDeposit(o.intents.address, String(b.txHash).slice(0, 120), o.intents.memo); return c.json(view_(o)); }
+    return c.json(view_(await payFromChain(o, String(b.assetId ?? ''), String(b.refundTo ?? '').trim())));
+  } catch (e: any) { return c.json({ error: String(e?.message ?? e).slice(0, 200) }, 400); }
 });
 app.post('/api/orders/:id/accept', async (c) => {
   const o = getOrder(c.req.param('id'));

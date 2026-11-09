@@ -8,13 +8,14 @@ import { randomBytes } from 'node:crypto';
 import { DATA_DIR, DRY } from './config.ts';
 import { publish } from './bus.ts';
 import { Job } from './job.ts';
-import { assignmentFor, auction, closeLots, type LotRecord } from './lots.ts';
+import { assignmentFor, auction, closeLots, takePricing, type LotRecord } from './lots.ts';
 import { NEARAI_HOST } from './nearai.ts';
 import { NEAR, ROOM_MIN, balanceOf, bankRoom, call, isAccountId, sha256, tg, toUnits, txUrl, view } from './near/chain.ts';
 import { priceFor, recordSpend } from './cfo/treasury.ts';
 import { findService, type Delivery } from './services/index.ts';
 import { briefOf } from './services/check.ts';
 import { settleBills } from './settle.ts';
+import { depositStatus, openDeposit, type Deposit } from './oneclick.ts';
 import type { ReceiptLine } from './meter.ts';
 import type { Step } from './job.ts';
 
@@ -32,6 +33,8 @@ export type Order = {
   parent?: { id: string; lot: number; by: string };
   /** The sub-jobs agents hired for this job's parts. */
   subs?: { id: string; title: string; by: string; amount: number; tx: string }[];
+  /** Paid from another chain through NEAR Intents (oneclick.ts): the deposit address and how it went. */
+  intents?: Deposit;
 };
 
 const dir = () => join(DATA_DIR, 'orders');
@@ -100,6 +103,58 @@ export async function fund(o: Order, withDemoWallet: boolean) {
 }
 
 /**
+ * Pay from another chain: a real 1Click deposit address whose swap lands as USDC in this job's escrow. The
+ * customer stays whoever the quote named (the house wallet accepts for a visitor without a NEAR wallet).
+ */
+export async function payFromChain(o: Order, assetId: string, refundTo: string) {
+  if (DRY || !NEAR) throw new Error('paying from another chain needs the live bank');
+  if (o.state !== 'quoted') throw new Error('this job is already paid');
+  if (o.intents && ['PENDING_DEPOSIT', 'KNOWN_DEPOSIT_TX', 'PROCESSING'].includes(o.intents.status) && Date.parse(o.intents.deadline) > Date.now()) return o;
+  o.intents = await openDeposit(NEAR.bank, NEAR.usdc, o.id, assetId, o.priceUsd, refundTo);
+  save(o);
+  watchDeposit(o.id);
+  return o;
+}
+
+const watching = new Set<string>();
+/** Poll 1Click until the swap settles; when it does, the bank holds the escrow and the job starts. */
+export function watchDeposit(id: string) {
+  if (watching.has(id)) return;
+  watching.add(id);
+  void (async () => {
+    try {
+      for (let i = 0; i < 400; i++) {
+        const o = getOrder(id);
+        if (!o?.intents || o.state !== 'quoted') return;
+        const s = await depositStatus(o.intents.address, o.intents.memo).catch(() => undefined);
+        if (s) {
+          const was = o.intents.status;
+          Object.assign(o.intents, { status: s.status, txs: s.txs, updatedAt: new Date().toISOString() });
+          if (s.status !== was) save(o);
+          if (s.status === 'SUCCESS') {
+            for (const t of s.txs.filter((x) => x.chain === 'near')) tx(o, `NEAR Intents paid ${o.priceUsd} USDC into escrow`, t.hash);
+            save(o);
+            for (let k = 0; k < 12 && (await jobState(o.id, 'Funded')) !== 'Funded'; k++) await new Promise((r) => setTimeout(r, 5000));
+            await fund(o, false);
+            return;
+          }
+          if (['REFUNDED', 'FAILED'].includes(s.status)) return;
+        }
+        if (Date.parse(o.intents.deadline) + 3600_000 < Date.now()) return;
+        await new Promise((r) => setTimeout(r, i < 60 ? 8000 : 20_000));
+      }
+    } catch (e: any) {
+      const o = getOrder(id);
+      if (o?.intents) { o.intents.status = `ERROR: ${String(e?.message ?? e).slice(0, 80)}`; save(o); }
+    } finally { watching.delete(id); }
+  })();
+}
+/** After a restart: pick up deposits still in flight. */
+export function resumeDeposits() {
+  for (const o of listOrders(200)) if (o.state === 'quoted' && o.intents && !['SUCCESS', 'REFUNDED', 'FAILED'].includes(o.intents.status)) watchDeposit(o.id);
+}
+
+/**
  * A board job the CFO has just taken (board.ts): the customer's own brief and budget, already in escrow on the
  * bank, so it starts at the auction.
  */
@@ -157,6 +212,7 @@ async function run(o: Order) {
     o.lots = clean(lots);
     o.state = 'working'; save(o);
     const job = new Job(o.id, o.service, { budgetUsd: o.priceUsd * 0.5, allowHosts: [NEARAI_HOST] }, assignmentFor(o.id));
+    for (const line of takePricing(o.id)) job.receipt.push(line); // the agents' own pricing calls, billed to each with the job
     let d: Delivery | undefined, err: string | undefined;
     try { d = await svc.run(job, o.input); } catch (e: any) { err = String(e?.message ?? e).slice(0, 200); job.log('cfo', 'error', err); }
     const pass = !!d?.check.pass;

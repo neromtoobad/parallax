@@ -19,13 +19,14 @@ import type { ReceiptLine } from './meter.ts';
 import { canHire, hire, receiptOf, researchQuotes } from './market.ts';
 import { award as awardRule, bidFor, goodRecord, planLots as splitLots, quality, r6, GROUPS } from './auction.ts';
 import { dropNotes, setNotes } from './notes.ts';
+import { remember, think } from './pricer.ts';
 
 /** Who won a lot: its role and the NEAR account that does (and pays for) the work. */
 export type Winner = { role: Role; account: string };
 
 export type LotRecord = {
   id: number; title: string; roles: Role[]; reserve: number;
-  bids: { agent: string; role: Role; price: number }[]; winner?: string; winnerRole?: Role; bid?: number; pay?: number;
+  bids: { agent: string; role: Role; price: number; why?: string; by?: string }[]; winner?: string; winnerRole?: Role; bid?: number; pay?: number;
   status: 'bidding' | 'awarded' | 'passed' | 'void' | 'failed'; tx?: string; round?: number;
   quotes?: { handle: string; price: number; quality: number; entered: boolean; why: string }[]; // from the Agent Market
   hire?: { handle: string; taskId: string; usd: number; receipt: string; textHash: string }; // an outside winner, hired
@@ -34,10 +35,16 @@ export type LotRecord = {
 
 // Which roles' work a winner takes over in a job, by order id (job.ts reads it when a service creates the job).
 const assigned = new Map<string, Partial<Record<Role, Winner>>>();
+// Each agent's call to price its bid, by order id, until the job's receipt takes them (orders.ts).
+const pricing = new Map<string, ReceiptLine[]>();
+export function takePricing(orderId: string): ReceiptLine[] { const l = pricing.get(orderId) ?? []; pricing.delete(orderId); return l; }
 export const assignmentFor = (orderId?: string) => (orderId ? assigned.get(orderId) : undefined) ?? {};
 
 /** An agent's short name: writer-2 for writer-2.team.parallax.testnet. */
 export const agentName = (account: string) => account.split('.')[0];
+
+/** Rule 39 (RULES.md): what a signed delivery files, the same sha256 the bank's `bound_part` computes. */
+export const boundPart = (lot: number, round: number, answers: string[], body: string) => sha256(`parallax-part:${lot}:${round}:${answers.join(',')}:${body}`);
 // Demo mode's team: one agent per role, plus a second for the roles that have one on testnet.
 const DEMO_SECONDS: Role[] = ['researcher', 'writer', 'illustrator', 'auditor'];
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -62,7 +69,7 @@ async function members(): Promise<Member[]> {
 }
 
 type Open = LotRecord & {
-  cost: number; salts: Map<string, { price: number; salt: string }>; commitEnd: number; revealEnd: number;
+  cost: number; salts: Map<string, { price: number; salt: string; why?: string; by?: string; markup?: number }>; commitEnd: number; revealEnd: number;
   outside: { handle: string; price: number; quality: number }[];
 };
 
@@ -169,15 +176,18 @@ async function commits(orderId: string, l: Open, team: Member[]) {
     const spec = isCrew(who) ? crewSpec(who) : undefined;
     if (isCrew(who) && !spec) return; // its spec isn't on this server, so it can't do the work
     const own = spec && r6(Math.max(0.001, l.cost * (1 + spec.markup / 100)));
-    const price = own ? (own <= l.reserve ? own : undefined) : bidFor(who, l.cost, rep, l.reserve);
     const agent = agentName(who);
-    if (price === undefined) { say(orderId, { phase: 'pass', lot: l.id, agent, role, why: 'its cost is above the reserve' }); return; }
+    // a team agent asks its own model what to ask (pricer.ts); an enlisted one uses its sponsor's markup
+    const t = own ? undefined : await think({ account: who, name: agent, role, lot: l.id, title: l.title, cost: l.cost, reserve: l.reserve, rep, round: l.round, rivals: team.filter((m) => l.roles.includes(m.role)).length - 1 });
+    if (t?.line) pricing.set(orderId, [...(pricing.get(orderId) ?? []), t.line]);
+    const price = own ? (own <= l.reserve ? own : undefined) : t!.price;
+    if (price === undefined) { say(orderId, { phase: 'pass', lot: l.id, agent, role, why: t?.by === 'model' ? `its price (${t.markup}% over cost) is above the reserve` : 'its cost is above the reserve' }); return; }
     // a winner pays its own model bill, and revealing locks a bond (rule 36), so an agent that can't cover both doesn't bid
     if (!DRY && (await balanceOf(who).catch(() => 0)) < l.cost + bondFor(price)) { say(orderId, { phase: 'pass', lot: l.id, agent, role, why: "can't cover the model bill and its bond yet" }); return; }
     const salt = randomBytes(8).toString('hex');
     try {
       if (!DRY) await act(who, 'commit', { lot: l.id, hash: sha256(`${l.id}:${who}:${toUnits(price)}:${salt}`) }, { tgas: 12 });
-      l.salts.set(who, { price, salt });
+      l.salts.set(who, { price, salt, ...(t ? { why: t.why, by: t.by, markup: t.markup } : { why: `its sponsor's markup, ${spec!.markup}%`, by: 'sponsor' }) });
       say(orderId, { phase: 'commit', lot: l.id, agent, role });
     } catch (e: any) {
       say(orderId, { phase: 'pass', lot: l.id, agent, role, why: String(e?.message ?? e).slice(0, 80) });
@@ -198,8 +208,8 @@ async function revealAndAward(orderId: string, l: Open, committing: Promise<void
     const role = byAccount.get(who)!.role, agent = agentName(who);
     try {
       if (!DRY) await act(who, 'reveal', { lot: l.id, price: toUnits(b.price), salt: b.salt }, { tgas: 12 });
-      l.bids.push({ agent: who, role, price: b.price });
-      say(orderId, { phase: 'reveal', lot: l.id, agent, role, price: b.price, bond: bondFor(b.price) });
+      l.bids.push({ agent: who, role, price: b.price, why: b.why, by: b.by });
+      say(orderId, { phase: 'reveal', lot: l.id, agent, role, price: b.price, bond: bondFor(b.price), why: b.why, by: b.by, markup: b.markup });
     } catch (e: any) {
       say(orderId, { phase: 'pass', lot: l.id, agent, role, why: `reveal failed: ${String(e?.message ?? e).slice(0, 60)}` });
     }
@@ -217,6 +227,10 @@ async function revealAndAward(orderId: string, l: Open, committing: Promise<void
       winner = w.Team ?? `outside:${w.Outside}`;
       bid = fromUnits(ev.bid); pay = fromUnits(ev.pay);
     }
+  }
+  // each revealed team bid is remembered with how it went, for that agent's next price
+  for (const b of l.bids) if (byAccount.has(b.agent) && !isCrew(b.agent)) {
+    try { remember(b.agent, { at: new Date().toISOString(), lot: l.title, cost: l.cost, reserve: l.reserve, price: b.price, won: b.agent === winner, pay: b.agent === winner ? pay : undefined, bidders: l.bids.length + l.outside.length }); } catch { /* memory is best effort */ }
   }
   if (!winner) { l.status = 'void'; say(orderId, { phase: 'void', lot: l.id, title: l.title }); return; }
   const won = byAccount.get(winner);
@@ -252,7 +266,7 @@ async function untilChain(t: number) {
  */
 export async function closeLots(orderId: string, lots: LotRecord[], job: Job | any, jobPassed: boolean, spare: (l: LotRecord) => string | undefined = () => undefined): Promise<LotRecord[]> {
   for (const l of lots.filter((x) => x.status === 'awarded')) {
-    const mine = (x: { agent: string }) => l.roles.includes(x.agent as Role) || x.agent === l.winnerRole;
+    const mine = (x: { agent: string; bid?: boolean }) => !x.bid && (l.roles.includes(x.agent as Role) || x.agent === l.winnerRole);
     const part = l.hire?.textHash ?? sha256(JSON.stringify({ steps: (job?.steps ?? []).filter(mine), receipt: (job?.receipt ?? []).filter(mine) }));
     const why = jobPassed ? undefined : spare(l);
     const pass = jobPassed || !!why;
@@ -263,7 +277,10 @@ export async function closeLots(orderId: string, lots: LotRecord[], job: Job | a
         else {
           // the TEE signatures of the part's model calls, which the bank checks against its approved signers
           const tee = ((job?.receipt ?? []) as ReceiptLine[]).filter((r) => mine(r) && r.tee).slice(-12).map((r) => ({ text: r.tee!.text, signature: r.tee!.signature }));
-          await act(l.winner!, 'deliver', { lot: l.id, deliverable: part, tee }, { tgas: 20 + 4 * tee.length });
+          // rule 39: the filed hash binds the part to this lot, its round on chain and the exact answers signed
+          const round = tee.length ? (await view<{ round: number }>(NEAR!.bank, 'get_lot', { id: l.id })).round : 0;
+          const deliverable = tee.length ? boundPart(l.id, round, tee.map((t) => t.text.split(':').pop()!), part) : part;
+          await act(l.winner!, 'deliver', { lot: l.id, deliverable, tee, ...(tee.length ? { body: part } : {}) }, { tgas: 24 + 5 * tee.length });
         }
         const r = await call(NEAR!.cfo, NEAR!.bank, 'inspect', { lot: l.id, pass, note });
         l.tx = r.hash;

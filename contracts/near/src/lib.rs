@@ -422,6 +422,18 @@ fn subs() -> LookupMap<String, u64> {
     LookupMap::new(b"Y".to_vec())
 }
 
+/// Rule 39: every TEE-signed answer that pays for work, by the first 16 bytes of the sha256 of its signed text,
+/// under its own prefix like the bonds. A signed answer counts for one delivery, once.
+fn used_answers() -> LookupMap<Vec<u8>, bool> {
+    LookupMap::new(b"W".to_vec())
+}
+
+/// Rule 39: the hash a signed delivery must file, which ties the part (`body`, the hash of its steps and receipt)
+/// to this lot, this round and the exact answers the TEE signed.
+pub fn bound_part(lot: u64, round: u8, answers: &[&str], body: &str) -> String {
+    hex(&env::sha256(format!("parallax-part:{}:{}:{}:{}", lot, round, answers.join(","), body).as_bytes()))
+}
+
 fn bond_key(lot: u64, agent: &AccountId) -> String {
     format!("{}:{}", lot, agent)
 }
@@ -510,6 +522,7 @@ impl Parallax {
         emit("policy", json!({"by": owner, "policy": policy}));
         emit("rules", json!({"newcomer_wins": NEWCOMER_WINS}));
         emit("rules", json!({"bond_bps": U128(BOND_BPS), "crew_max_fails": CREW_MAX_FAILS}));
+        emit("rules", json!({"bound_work": true}));
         Self {
             owner,
             cfo,
@@ -1044,20 +1057,43 @@ impl Parallax {
 
     /// A team winner files its work (the hash of its files) with NEAR AI Cloud's TEE signatures over
     /// its model calls. Each must recover to an approved signer whose model the signed text names.
-    pub fn deliver(&mut self, lot: u64, deliverable: String, tee: Option<Vec<TeeSig>>) {
-        self.do_deliver(env::predecessor_account_id(), lot, deliverable, tee);
+    /// Called by the bank itself in the transaction that deploys rule 39, so the history shows from which block a
+    /// signed delivery must be bound to its lot and its answers (a fresh bank says so in `new`).
+    #[private]
+    pub fn mark_bound(&mut self) {
+        emit("rules", json!({"bound_work": true}));
     }
 
-    fn do_deliver(&mut self, me: AccountId, lot: u64, deliverable: String, tee: Option<Vec<TeeSig>>) {
+    /// With signatures, `deliverable` must be `bound_part(lot, round, answers, body)` (rule 39).
+    pub fn deliver(&mut self, lot: u64, deliverable: String, tee: Option<Vec<TeeSig>>, body: Option<String>) {
+        self.do_deliver(env::predecessor_account_id(), lot, deliverable, tee, body);
+    }
+
+    fn do_deliver(&mut self, me: AccountId, lot: u64, deliverable: String, tee: Option<Vec<TeeSig>>, body: Option<String>) {
         self.alive();
         let mut l = self.lot(lot);
         require!(l.status == LotStatus::Awarded, "not awarded");
         require!(l.winner == Some(Seller::Team(me.clone())), "not the winner");
         let signed = self.check_tee(tee.unwrap_or_default(), "team work must carry TEE signatures");
+        let filed = body.clone();
+        if !signed.is_empty() {
+            // Rule 39: the filed hash commits to this lot, this round and these signed answers, and no signed
+            // answer pays for two deliveries.
+            let body = body.unwrap_or_else(|| env::panic_str("signed work must name the hash of its part"));
+            require!(!body.is_empty() && body.len() <= 128, "the part's hash must be 1 to 128 characters");
+            let answers: Vec<&str> = signed.iter().map(|s| s.text.rsplit(':').next().unwrap_or("")).collect();
+            require!(deliverable == bound_part(lot, l.round, &answers, &body), "the filed hash isn't bound to this lot and its signed answers");
+            let mut used = used_answers();
+            for s in signed.iter() {
+                let k = env::sha256(s.text.as_bytes())[..16].to_vec();
+                require!(!used.contains_key(&k), "a signed answer was already filed for other work");
+                used.insert(k, true);
+            }
+        }
         l.status = LotStatus::Submitted;
         l.deliverable = deliverable.clone();
         self.lots.replace(lot as u32, l);
-        emit("deliver", json!({"lot": U64(lot), "by": me, "deliverable": deliverable, "tee": signed}));
+        emit("deliver", json!({"lot": U64(lot), "by": me, "deliverable": deliverable, "tee": signed, "body": filed}));
     }
 
     /// The inspector's verdict. A pass books the pay; a fail re-auctions without the seller.
@@ -1275,9 +1311,9 @@ impl Parallax {
         self.do_reveal(agent, lot, price, salt);
     }
 
-    pub fn crew_deliver(&mut self, agent: AccountId, lot: u64, deliverable: String, tee: Option<Vec<TeeSig>>) {
+    pub fn crew_deliver(&mut self, agent: AccountId, lot: u64, deliverable: String, tee: Option<Vec<TeeSig>>, body: Option<String>) {
         self.only_operator(&agent);
-        self.do_deliver(agent, lot, deliverable, tee);
+        self.do_deliver(agent, lot, deliverable, tee, body);
     }
 
     pub fn crew_pay_bill(&mut self, agent: AccountId, amount: U128, memo: String) {

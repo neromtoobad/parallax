@@ -64,8 +64,8 @@ const LOT_BADGE: Record<string, [string, string]> = {
 export function LotCard({ lot, explorer }: { lot: LiveLot; explorer?: string | null }) {
   const out = (lot.quotes ?? []).filter((q) => q.entered);
   const rows = [
-    ...lot.bids.map((b) => ({ who: b.agent, price: b.price, outside: false })),
-    ...out.map((q) => ({ who: `outside:${q.handle}`, price: q.price, outside: true })),
+    ...lot.bids.map((b) => ({ who: b.agent, price: b.price, outside: false, why: b.by === 'model' ? b.why : undefined })),
+    ...out.map((q) => ({ who: `outside:${q.handle}`, price: q.price, outside: true, why: undefined as string | undefined })),
   ].sort((a, b) => a.price - b.price);
   const revealed = new Set(lot.bids.map((b) => b.agent));
   const waiting = (lot.sealed ?? []).filter((a) => !revealed.has(a));
@@ -81,7 +81,7 @@ export function LotCard({ lot, explorer }: { lot: LiveLot; explorer?: string | n
         return (
           <div key={r.who} className={`bid${win ? ' win' : ''}`}>
             <Face account={r.who} />
-            <span className="who">{r.outside && <span className="mk">Agent Market</span>}{win ? <b>{nameOf(r.who)}</b> : nameOf(r.who)}{win && <small> · won</small>}</span>
+            <span className="who">{r.outside && <span className="mk">Agent Market</span>}{win ? <b>{nameOf(r.who)}</b> : nameOf(r.who)}{win && <small> · won</small>}{r.why && <small className="why" title="its own model call priced this bid, TEE-signed">“{r.why}”</small>}</span>
             <span className="p">{usd(r.price)}</span>
           </div>
         );

@@ -15,7 +15,7 @@ export function applyLot(lots: LiveLot[], d: any): LiveLot[] {
     case 'open': Object.assign(l, { id: d.lot, status: 'bidding', ...(d.round > 1 ? { round: d.round, bids: [], sealed: [], quotes: [], winner: undefined, pay: undefined } : {}) }); break;
     case 'commit': l.sealed = [...(l.sealed ?? []), d.agent]; break;
     case 'quote': l.quotes = [...(l.quotes ?? []), { handle: d.agent, price: d.price, quality: d.quality, entered: d.entered, why: d.why ?? '' }]; break;
-    case 'reveal': l.bids = [...l.bids, { agent: d.agent, role: d.role, price: d.price }]; break;
+    case 'reveal': l.bids = [...l.bids, { agent: d.agent, role: d.role, price: d.price, why: d.why, by: d.by }]; break;
     case 'award': Object.assign(l, { status: 'awarded', winner: d.role === 'outside' ? `outside:${d.winner}` : d.winner, bid: d.bid, pay: d.pay, tx: d.tx }); break;
     case 'void': l.status = 'void'; break;
     case 'pass-inspection': l.status = 'passed'; break;

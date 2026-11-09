@@ -13,13 +13,14 @@ export type AgentProfile = {
 export type Agent = { id: string; role: string; name: string; title: string; look: string; about: string; account: string; url: string | null; rep: number; active: boolean };
 export type Lot = {
   id: number; title: string; roles: string[]; reserve: number; status: string; tx?: string; round?: number;
-  bids: { agent: string; role: string; price: number }[]; winner?: string; winnerRole?: string; bid?: number; pay?: number;
+  bids: { agent: string; role: string; price: number; why?: string; by?: string }[]; winner?: string; winnerRole?: string; bid?: number; pay?: number;
   quotes?: { handle: string; price: number; quality: number; entered: boolean; why: string }[];
   hire?: { handle: string; taskId: string; usd: number };
 };
 export type Step = { at: string; agent: string; kind: string; text: string; account?: string };
 export type Receipt = { at: string; agent: string; vendor: string; usd: number; reason: string; dry: boolean; account?: string; settledTx?: string };
 export type Lead = { name: string; kind: string; address: string; website?: string; phone?: string; email?: string; osm: string; fit: number; why: string; opener: string; note?: string };
+export type PayAsset = { assetId: string; chain: string; symbol: string; decimals: number; price: number };
 export type Order = {
   id: string; service: string; input?: Record<string, string>; brief?: string; priceUsd: number; customer: string;
   state: 'quoted' | 'funded' | 'bidding' | 'working' | 'delivered' | 'accepted' | 'rejected' | 'failed';
@@ -33,6 +34,7 @@ export type Order = {
   error?: string;
   parent?: { id: string; lot: number; by: string };
   subs?: { id: string; title: string; by: string; amount: number; tx: string }[];
+  intents?: { assetId: string; chain: string; symbol: string; address: string; memo?: string; amountIn: string; amountInUsd: number; refundTo: string; deadline: string; status: string; txs?: { chain: string; hash: string }[] };
 };
 export type Info = {
   mode: string; model: string; bank: string | null; explorer: string | null; usdc: string | null; search: boolean;
@@ -70,6 +72,9 @@ export const api = {
   order: (id: string) => req<Order>(`/api/orders/${id}`),
   quote: (service: string, input: Record<string, string>, customer?: string) => req<Order>('/api/orders', { service, input, customer }),
   pay: (id: string, wallet: 'demo' | 'own' = 'demo') => req<Order>(`/api/orders/${id}/pay`, { wallet }),
+  payAssets: () => req<PayAsset[]>('/api/pay/assets'),
+  payFromChain: (id: string, assetId: string, refundTo: string) => req<Order>(`/api/orders/${id}/intents`, { assetId, refundTo }),
+  sentDeposit: (id: string, txHash: string) => req<Order>(`/api/orders/${id}/intents`, { txHash }),
   accept: (id: string, tx?: string) => req<Order>(`/api/orders/${id}/accept`, { tx }),
   reject: (id: string, tx?: string) => req<Order>(`/api/orders/${id}/reject`, { tx }),
   board: () => req<{ houseMax: number; limits: BoardLimits; jobs: BoardJob[] }>('/api/board'),

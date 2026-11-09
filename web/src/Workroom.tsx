@@ -10,7 +10,7 @@ type Beat =
   | { k: 'open'; key: string; title: string; reserve: number }
   | { k: 'commit'; key: string; who: string }
   | { k: 'quote'; key: string; handle: string; price: number; entered: boolean }
-  | { k: 'reveal'; key: string; who: string; price: number }
+  | { k: 'reveal'; key: string; who: string; price: number; why?: string }
   | { k: 'award'; key: string; title: string; who: string; pay?: number }
   | { k: 'void'; key: string; title: string }
   | { k: 'step'; key: string; who: string; text: string; kind: string }
@@ -70,7 +70,7 @@ function beatsOf(o: Order, lots: LiveLot[], steps: Step[]): Beat[] {
     const sealed = [...new Set([...(l.sealed ?? []), ...l.bids.map((b) => b.agent)].map((a) => idOf(a) ?? a))];
     for (const a of sealed) out.push({ k: 'commit', key: `c:${r}:${a}`, who: a });
     for (const q of l.quotes ?? []) out.push({ k: 'quote', key: `q:${r}:${q.handle}`, handle: q.handle, price: q.price, entered: q.entered });
-    for (const b of l.bids) out.push({ k: 'reveal', key: `r:${r}:${idOf(b.agent)}`, who: idOf(b.agent)!, price: b.price });
+    for (const b of l.bids) out.push({ k: 'reveal', key: `r:${r}:${idOf(b.agent)}`, who: idOf(b.agent)!, price: b.price, why: b.by === 'model' ? b.why : undefined });
     if (l.winner) out.push({ k: 'award', key: `a:${r}`, title: l.title, who: l.winner.startsWith('outside:') ? l.winner : idOf(l.winner)!, pay: l.pay });
     if (l.status === 'void') out.push({ k: 'void', key: `v:${r}`, title: l.title });
   }
@@ -139,7 +139,7 @@ function fold(beats: Beat[]): Scene {
         if (row) row.price = b.price;
         delete s.pose[b.who];
         s.tag[b.who] = `${usd(b.price)}`;
-        s.caption = `${name(b.who)} reveals ${usd(b.price)} USDC. The bank checks it against the hash.`;
+        s.caption = b.why ? `${name(b.who)} reveals ${usd(b.price)} USDC: “${b.why}”` : `${name(b.who)} reveals ${usd(b.price)} USDC. The bank checks it against the hash.`;
         break;
       }
       case 'award':

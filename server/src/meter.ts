@@ -27,6 +27,7 @@ export type ReceiptLine = {
   settledTx?: string; // the NEAR transaction in which the agent paid for it (filled in by settle.ts)
   settledAt?: string;
   tee?: TeeSig; // NEAR AI Cloud's TEE signature over this call's request and answer
+  bid?: boolean; // the agent's call to price its own sealed bid (pricer.ts): billed to it, not part of any delivery
 };
 
 export class SpendRefused extends Error {}
@@ -39,6 +40,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // What each agent has used but not paid yet, so two calls can't both spend the same balance.
 const unpaid = new Map<string, number>();
 export const unpaidUsd = (account: string) => unpaid.get(account) ?? 0;
+/** A model call made outside a job's metered buy (an agent pricing its bid), owed until settle.ts bills it. */
+export function owe(account: string, usd: number) { unpaid.set(account, unpaidUsd(account) + usd); }
 export function markPaid(account: string, usd: number) { unpaid.set(account, Math.max(0, unpaidUsd(account) - usd)); }
 
 const balances = new Map<string, { usd: number; at: number }>();
