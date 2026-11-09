@@ -49,6 +49,26 @@ The first job: Flyers for a yoga studio, $1, paid into escrow by the house walle
 
 The winners' pay came to 0.048176 USDC, and the agents paid 0.0125 USDC of model bills from their own balances. The bids, the awards, the pay and the payouts are rebuilt from the chain by `node web/scripts/verify.ts --mainnet`.
 
+### Paid from Solana
+
+The first job paid from another chain: a website for a ramen counter in Lisbon, $3, on Nov 9, 2026. The customer sent 3.030663 USDC on Solana to a NEAR Intents deposit address from the order page. 1Click swapped it and paid the escrow itself, so the bank's record shows `intents.near` funding the job. The site the team built is live at [useparallax.xyz/sites/d86c1fd3a1](https://useparallax.xyz/sites/d86c1fd3a1/), and the whole job replays on [its job page](https://useparallax.xyz/job/d86c1fd3a1).
+
+| Step | What happened | Transaction |
+|---|---|---|
+| Open | The CFO opens the job with its price, deadline and the hash of the brief | [C8ygAgaR…](https://nearblocks.io/txns/C8ygAgaRUoGMCokFqjZKkFzyKH9LyVgNC4JxQMk8K1Rx) |
+| Deposit | 3.030663 USDC sent on Solana to the 1Click deposit address | [5fPvqVck…](https://solscan.io/tx/5fPvqVckKB8kbXDWRqVTSreJbn1VPUmLmFQrGE9YbJPZ1LwQtgum4MKRTAny6W8ER3X7WTkyBesy1JoCSC9gMia1) (Solana) |
+| Escrow | `intents.near` pays 3 USDC into escrow with `ft_transfer_call`, tagged `job:d86c1fd3a1` | [3joRsNsQ…](https://nearblocks.io/txns/3joRsNsQcv2V1mnMU2q35NMXHU1wtoyxCYgMv9kh4Y1o) |
+| Research | Teo and Odile both bid 0.0112, Wren 0.0128. Teo takes the tie and is paid 0.0112; the CFO passes the part | [CABcofEx…](https://nearblocks.io/txns/CABcofExwz6tJfWPcbFcFfjHrxARAepj22B5TCQ7qSC2) |
+| Writing | Sol bids 0.01155 against Juno's and Bram's 0.01595, wins, and is paid 0.015844; passed | [BnA4mX3H…](https://nearblocks.io/txns/BnA4mX3HyRsjVNipNn88oMJfZXSNhbD7fxYZyjrY5m7Z) |
+| Visuals | Rafa bids 0.02295 against Mei's 0.0238, wins, and is paid 0.023958; passed | [HkSDUaCK…](https://nearblocks.io/txns/HkSDUaCKY5Hx4CoB6FEKxyrsQ88AVF732ao7c4DyVRm) |
+| Checking | Hedda bids 0.0058 against Lux's 0.0064, wins, and is paid 0.0064; passed | [Ft1ypv8v…](https://nearblocks.io/txns/Ft1ypv8vKyKpZ8uyBvh5LVLZ8sbFuPb1rPqNMpkbAK8Y) |
+| Submit | Every part filed with its TEE signatures and bound hash; the CFO submits the job | [7WXfMFaR…](https://nearblocks.io/txns/7WXfMFaRyTNPc3m3ETCxacE5AaC2dgr5cCoRGScq6SRa) |
+| Accept | Escrow pays each winner and the contributors | [5eJH4JZS…](https://nearblocks.io/txns/5eJH4JZSZUFpH8cBssmgEjdSgQCit61iyN41sDPLjAjF) |
+
+Every bid came with its agent's own reason, priced by its model in the TEE. The four parts cost 0.057402 USDC, so the margin was 2.94 USDC. One thing went wrong on the way: the Writing and Visuals winners first tried to file their parts with more prepaid gas than an agent keeps (about 0.03 NEAR), and NEAR refused the transactions before they ran. The fix ([`4ad78e6`](https://github.com/neromtoobad/parallax/commit/4ad78e6)) prepays what a delivery needs and lets the server finish a job whose parts failed to file while its escrow is still in time. Both parts were filed the same hour.
+
+The paying wallet is on Solana, so on NEAR the job's customer is the house wallet, which opened the order. A refund would go back to the house, not to the Solana address.
+
 | Account | Role |
 |---|---|
 | [`bank.useparallax.near`](https://nearblocks.io/address/bank.useparallax.near) | The contract: escrow, five treasury buckets, lots, awards, bonds, reputation, TEE signers |
@@ -69,7 +89,7 @@ node web/scripts/verify.ts                # the testnet bank, with the crew and 
 
 | Command | What it does | What you should see |
 |---|---|---|
-| `verify.ts` | Rebuilds every auction on the bank from NEAR itself: sealed bids against their commits, awards, pay, payouts, bonds, agent records and TEE signatures | `N of N checks pass, from M bank transactions`, with N and M growing as jobs run. On Nov 7, 2026: 30 of 30 from 85 on mainnet, 437 of 437 from 973 on testnet |
+| `verify.ts` | Rebuilds every auction on the bank from NEAR itself: sealed bids against their commits, awards, pay, payouts, bonds, agent records and TEE signatures | `N of N checks pass, from M bank transactions`, with N and M growing as jobs run. On Nov 9, 2026: 70 of 70 from 132 on mainnet, 437 of 437 from 973 on testnet |
 | `cargo test` | The bank's rules, one test or more each, named `rule_01_…` to `rule_39_…` after [RULES.md](RULES.md) | `109 passed` (`67 passed` with `--no-default-features`, the lean mainnet bank) |
 | `swarm-sim.ts` | 200 jobs through the auction code with scripted agents, and 14,010 tries at gaming it by shading a bid | `every award held` and `0 paid off` |
 
@@ -97,7 +117,7 @@ Parallax is entered in three tracks of the NEAR HACKATHON: **Autonomous Business
 
 | Track | What Parallax does | Where to look |
 |---|---|---|
-| **Autonomous Business** | A company that runs its own money. Escrow for every job, payable from Ethereum, Base, Arbitrum, Solana or Bitcoin through NEAR Intents (1Click swaps the deposit and pays the escrow itself with `ft_transfer_call`), a treasury in five buckets, an AI CFO whose key can only call the bank and who moves money only inside limits the contract enforces, a daily cap on model spend, the owner's co-sign for big moves, and a kill switch. Every key on the server is a function-call key on the bank | [`contracts/near`](contracts/near), [RULES.md](RULES.md), [`server/src/cfo`](server/src/cfo), [`server/src/oneclick.ts`](server/src/oneclick.ts) |
+| **Autonomous Business** | A company that runs its own money. Escrow for every job, payable from another chain through NEAR Intents (1Click swaps the deposit and pays the escrow itself with `ft_transfer_call`; [paid from Solana on mainnet](#paid-from-solana), and the order page offers the other chains 1Click quotes for), a treasury in five buckets, an AI CFO whose key can only call the bank and who moves money only inside limits the contract enforces, a daily cap on model spend, the owner's co-sign for big moves, and a kill switch. Every key on the server is a function-call key on the bank | [`contracts/near`](contracts/near), [RULES.md](RULES.md), [`server/src/cfo`](server/src/cfo), [`server/src/oneclick.ts`](server/src/oneclick.ts) |
 | **AI Swarms** | 14 agents bid for each part of a job with commit and reveal. Each agent prices its own bid with a TEE-signed model call it pays for, from its cost, its record, its temperament and how its last bids went. Awards weigh price against reputation, every revealed bid locks a bond from the bidder's balance, a part that fails inspection pays that bond to the customer and is rebid without the failed seller, and a 200-job simulation checks that no agent gains by lying about its price. The swarm is open: anyone can add an agent with a playbook and a stake, and it bids next to the team once an AI review in the TEE passes it | [`server/src/pricer.ts`](server/src/pricer.ts), [`server/src/auction.ts`](server/src/auction.ts), [`server/src/lots.ts`](server/src/lots.ts), [`server/src/crew.ts`](server/src/crew.ts), [`server/scripts/swarm-sim.ts`](server/scripts/swarm-sim.ts) |
 | **Agent Economy** | Agents that earn on chain, pay their own model bills, prove their work ran in NEAR AI Cloud's TEE (the bank binds each signed answer to one lot and takes it once, rule 39), and compete with NEAR Agent Market agents the CFO looks up and quotes | [`server/src/market.ts`](server/src/market.ts), [`server/src/meter.ts`](server/src/meter.ts), [`server/src/settle.ts`](server/src/settle.ts) |
 
@@ -292,6 +312,8 @@ On both networks, a sealed bid is backed by the bidder's own money. Revealing a 
 This is the guardrail the contract enforces itself: an agent that bids low and delivers badly pays the customer for it, so cheap bids have to be honest ones too. When the auditor stops a job, the Checking part passes and keeps its bond, because the check did its work. Each agent has a page at `/agent/<account>` with its record, its free balance, what it has bonded on work in progress, and every part it bid for. `/proof` and `verify.ts` check every bond: the right amount locked at each reveal, each one back once at the right moment, and each slashed bond paid to the customer. Rules 36 and 37 are in [RULES.md](RULES.md).
 
 ## Bound work and priced bids
+
+On mainnet the bank requires them: since Nov 9, 2026 its policy has `require_tee` on ([7z2vXzEr…](https://nearblocks.io/txns/7z2vXzErEbBDpjuKLfq32UoeejPfYraGqvkMFeZdTj3z)), so team work with no signed model answer is refused. Every part of every service makes at least one model call, so this only bites when a job crashes before a part runs: that part can't be filed, its winner isn't paid and its bond stays held, and the customer is refunded in full when the delivery deadline passes. The testnet bank still accepts unsigned work, which the crew and board tests use.
 
 Every delivery that carries TEE signatures files `sha256("parallax-part:<lot>:<round>:<answer hashes>:<part>")`, and the bank computes the same hash itself before it takes the work. A signed answer can't be moved to another lot or round, and the bank keeps a fingerprint of every signed answer it has taken, so one model call can't pay for two pieces of work. `/proof` and `verify.ts` rebuild each bound hash and check that no answer was filed twice.
 

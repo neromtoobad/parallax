@@ -248,6 +248,16 @@ function demoAward(l: Open, byAccount: Map<string, Member>): [string | undefined
   return won ? [won.winner.who, won.winner.price, won.pay] : [undefined, 0, 0];
 }
 
+let teePolicy: { at: number; on: boolean } | undefined;
+/** The bank's require_tee, read at most once every five minutes. */
+async function requiresTee() {
+  if (!teePolicy || Date.now() - teePolicy.at > 300_000) {
+    const p = await view<{ require_tee: boolean }>(NEAR!.bank, 'get_policy', {}).catch(() => undefined);
+    teePolicy = { at: Date.now(), on: !!p?.require_tee };
+  }
+  return teePolicy.on;
+}
+
 async function untilChain(t: number) {
   for (;;) {
     const now = DRY ? Date.now() / 1000 : await chainNow().catch(() => Date.now() / 1000);
@@ -277,6 +287,9 @@ export async function closeLots(orderId: string, lots: LotRecord[], job: Job | a
         else {
           // the TEE signatures of the part's model calls, which the bank checks against its approved signers
           const tee = ((job?.receipt ?? []) as ReceiptLine[]).filter((r) => mine(r) && r.tee).slice(-12).map((r) => ({ text: r.tee!.text, signature: r.tee!.signature }));
+          // with require_tee the bank refuses unsigned work, so don't spend gas on it: a part that never ran (an
+          // earlier part crashed) stays awarded, its bond held, and the customer is refunded in full as usual
+          if (!tee.length && (await requiresTee())) throw new Error('no signed model work to file, and the bank requires it');
           // rule 39: the filed hash binds the part to this lot, its round on chain and the exact answers signed
           const round = tee.length ? (await view<{ round: number }>(NEAR!.bank, 'get_lot', { id: l.id })).round : 0;
           const deliverable = tee.length ? boundPart(l.id, round, tee.map((t) => t.text.split(':').pop()!), part) : part;
