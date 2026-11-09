@@ -8,7 +8,7 @@ import { streamSSE } from 'hono/streaming';
 import { relative } from 'node:path';
 import { CANNED, DRY, MODEL, PORT, WEB_DIR } from './config.ts';
 import { backlog, bus, type Event } from './bus.ts';
-import { accept, demoPayer, fund, getOrder, listOrders, payFromChain, quote, rejected, resumeDeposits, sitePath, type Order } from './orders.ts';
+import { accept, demoPayer, finishOpenLots, fund, getOrder, listOrders, payFromChain, quote, rejected, resumeDeposits, sitePath, type Order } from './orders.ts';
 import { payAssets, submitDeposit } from './oneclick.ts';
 import { startTreasury } from './cfo/loop.ts';
 import { SERVICES } from './services/index.ts';
@@ -24,6 +24,7 @@ import { HOUSE_STAKE, MIN_STAKE, agentId, crew, crewView, enlistForVisitor, pars
 registerSearch();
 startTreasury();
 resumeDeposits();
+void finishOpenLots().catch((e) => console.warn('[finishOpenLots]', String(e?.message ?? e).slice(0, 160)));
 void warmTee();
 // The crew: keep the roster fresh (lots read enlisted agents' specs from it) and review whoever is waiting.
 if (!DRY && NEAR?.crew) {

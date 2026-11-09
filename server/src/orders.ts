@@ -150,6 +150,27 @@ export function watchDeposit(id: string) {
   })();
 }
 /** After a restart: pick up deposits still in flight. */
+/**
+ * A job whose work passed the auditor but where a part's filing failed (the lot stayed awarded on chain, so the bank
+ * refused the delivery): file the open parts again and submit, while the escrow is still in time. Runs at start.
+ */
+export async function finishOpenLots() {
+  if (DRY || !NEAR) return;
+  for (const o of listOrders(200)) {
+    if (o.state !== 'failed' || !o.delivery?.check?.pass || !o.lots.some((l) => l.status === 'awarded')) continue;
+    const j = await view<{ state: string; deliver_by: string }>(NEAR.bank, 'get_job', { id: o.id }).catch(() => undefined);
+    if (!j || j.state !== 'Funded' || Date.now() * 1e6 > Number(j.deliver_by)) continue;
+    try {
+      o.lots = clean(await closeLots(o.id, o.lots, { steps: o.steps, receipt: o.receipt }, true));
+      const stuck = o.lots.filter((l) => l.status === 'awarded');
+      if (stuck.length) { o.error = `still could not file ${stuck.map((l) => l.title).join(', ')}: ${stuck[0].error ?? ''}`.slice(0, 200); save(o); continue; }
+      tx(o, 'Work submitted to the bank', (await call(NEAR.cfo, NEAR.bank, 'submit_job', { id: o.id, deliverable_hash: sha256(JSON.stringify(o.delivery)) })).hash);
+      o.steps = [...o.steps, { at: new Date().toISOString(), agent: 'messenger', kind: 'done', text: 'Delivered. It is waiting for you to accept.' } as any];
+      o.state = 'delivered'; o.error = undefined; save(o);
+    } catch (e: any) { o.error = String(e?.message ?? e).slice(0, 200); save(o); }
+  }
+}
+
 export function resumeDeposits() {
   for (const o of listOrders(200)) if (o.state === 'quoted' && o.intents && !['SUCCESS', 'REFUNDED', 'FAILED'].includes(o.intents.status)) watchDeposit(o.id);
 }
@@ -229,6 +250,8 @@ async function run(o: Order) {
       return;
     }
     o.delivery = strip(o.id, d);
+    const stuck = o.lots.filter((l) => l.status === 'awarded');
+    if (stuck.length) throw new Error(`${stuck.map((l) => `${l.title} could not be filed (${l.error ?? 'unknown'})`).join('; ')}`.slice(0, 200));
     if (!DRY) tx(o, 'Work submitted to the bank', (await call(NEAR!.cfo, NEAR!.bank, 'submit_job', { id: o.id, deliverable_hash: sha256(JSON.stringify(o.delivery)) })).hash);
     job.log('messenger', 'done', 'Delivered. It is waiting for you to accept.');
     o.steps = job.steps;

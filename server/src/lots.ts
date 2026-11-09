@@ -9,7 +9,7 @@
 import { randomBytes } from 'node:crypto';
 import { DRY } from './config.ts';
 import { publish } from './bus.ts';
-import { NEAR, act, balanceOf, call, canSign, chainNow, events, fromUnits, has, isCrew, sha256, toUnits, view } from './near/chain.ts';
+import { NEAR, act, balanceOf, call, canSign, chainNow, events, fromUnits, has, isCrew, sha256, tg, toUnits, view } from './near/chain.ts';
 import { crewSpec } from './crew.ts';
 import { type Role } from './wallets.ts';
 import { spendFor } from './cfo/treasury.ts';
@@ -27,7 +27,7 @@ export type Winner = { role: Role; account: string };
 export type LotRecord = {
   id: number; title: string; roles: Role[]; reserve: number;
   bids: { agent: string; role: Role; price: number; why?: string; by?: string }[]; winner?: string; winnerRole?: Role; bid?: number; pay?: number;
-  status: 'bidding' | 'awarded' | 'passed' | 'void' | 'failed'; tx?: string; round?: number;
+  status: 'bidding' | 'awarded' | 'passed' | 'void' | 'failed'; tx?: string; round?: number; error?: string;
   quotes?: { handle: string; price: number; quality: number; entered: boolean; why: string }[]; // from the Agent Market
   hire?: { handle: string; taskId: string; usd: number; receipt: string; textHash: string }; // an outside winner, hired
   slashed?: number; // the winner's bond, paid to the customer when its work failed (rule 36)
@@ -280,7 +280,10 @@ export async function closeLots(orderId: string, lots: LotRecord[], job: Job | a
           // rule 39: the filed hash binds the part to this lot, its round on chain and the exact answers signed
           const round = tee.length ? (await view<{ round: number }>(NEAR!.bank, 'get_lot', { id: l.id })).round : 0;
           const deliverable = tee.length ? boundPart(l.id, round, tee.map((t) => t.text.split(':').pop()!), part) : part;
-          await act(l.winner!, 'deliver', { lot: l.id, deliverable, tee, ...(tee.length ? { body: part } : {}) }, { tgas: 24 + 5 * tee.length });
+          // A deliver burns ~3 Tgas with one signature (~0.5 more per extra one), but the signer must hold the whole
+          // prepaid gas up front: on mainnet an agent keeps ~0.03 NEAR, so 24 + 5 per signature (34 Tgas with two)
+          // was refused before it ran (job d86c1fd3a1). Mainnet prepays 8 + 1.5 per signature, at most 26.
+          await act(l.winner!, 'deliver', { lot: l.id, deliverable, tee, ...(tee.length ? { body: part } : {}) }, { tgas: tg(Math.ceil(8 + 1.5 * tee.length), 24 + 5 * tee.length) });
         }
         const r = await call(NEAR!.cfo, NEAR!.bank, 'inspect', { lot: l.id, pass, note });
         l.tx = r.hash;
@@ -290,7 +293,9 @@ export async function closeLots(orderId: string, lots: LotRecord[], job: Job | a
       l.status = pass ? 'passed' : 'failed';
       say(orderId, { phase: pass ? 'pass-inspection' : 'fail-inspection', lot: l.id, title: l.title, winner: agentName(l.winner!.replace('outside:', '')), pay: l.pay, slashed: l.slashed, tx: l.tx });
     } catch (e: any) {
-      say(orderId, { phase: 'error', lot: l.id, why: String(e?.message ?? e).slice(0, 120) });
+      // the lot stays awarded on chain; keep why, so the order can say it and finishOpenLots can retry
+      l.error = String(e?.message ?? e).slice(0, 200);
+      say(orderId, { phase: 'error', lot: l.id, why: l.error.slice(0, 120) });
     }
   }
   assigned.delete(orderId);
