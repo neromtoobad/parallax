@@ -63,6 +63,16 @@ function rotate() {
 }
 export const rpc = () => provider;
 
+/**
+ * The RPC client has no request timeout, so one connection a public node never answers would hold a bid's
+ * reveal (or a whole job) forever. Every request gets a deadline; "timeout" in the message is what makes
+ * `call` and `view` move to the next node and try again.
+ */
+export function timed<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let t: NodeJS.Timeout;
+  return Promise.race([p, new Promise<never>((_, no) => { t = setTimeout(() => no(new Error(`timeout: ${what} got no answer in ${ms / 1000}s`)), ms); })]).finally(() => clearTimeout(t));
+}
+
 export const USDC = 1e6; // 6 decimals
 export const toUnits = (usd: number) => BigInt(Math.round(usd * USDC)).toString();
 export const fromUnits = (u: string | number | bigint) => Number(u) / USDC;
@@ -121,7 +131,7 @@ export const verifySig = (publicKey: string, data: Uint8Array, sigHex: string) =
 
 /** The public keys an account has on chain. */
 export async function keysOf(id: string): Promise<string[]> {
-  const r: any = await (provider as any).viewAccessKeyList({ accountId: id, blockQuery: { finality: 'optimistic' } }).catch(() => null);
+  const r: any = await timed((provider as any).viewAccessKeyList({ accountId: id, blockQuery: { finality: 'optimistic' } }), 10_000, 'key list').catch(() => null);
   return (r?.keys ?? []).map((k: any) => k.public_key);
 }
 
@@ -162,11 +172,11 @@ export function call(signer: string, contract: string, method: string, args: obj
     for (let attempt = 0; ; attempt++) {
       let hash: string | undefined;
       try {
-        const signed = await account(signer).createSignedTransaction({
+        const signed = await timed(account(signer).createSignedTransaction({
           receiverId: contract, actions: [actions.functionCall(method, args, BigInt(o.tgas ?? 30) * TGAS, o.deposit ?? 0n)],
-        });
+        }), 12_000, `signing ${method}`);
         hash = baseEncode(createHash('sha256').update(encodeTransaction(signed.transaction)).digest());
-        await rpc().sendTransactionUntil(signed, 'INCLUDED').catch((e: any) => {
+        await timed(rpc().sendTransactionUntil(signed, 'INCLUDED'), 20_000, `sending ${method}`).catch((e: any) => {
           const m = String(e?.message ?? e);
           if (/NotEnoughBalance|Not enough balance/i.test(m)) throw new ChainError(`${signer} has too little NEAR to cover this call's gas (${o.tgas ?? 30} Tgas needs about ${((o.tgas ?? 30) / 1000).toFixed(3)} NEAR free)`);
           if (/panicked|InvalidNonce|expired|LackBalanceForState|InvalidAccessKey|DoesNotFitStorage/i.test(m)) throw e;
@@ -198,7 +208,7 @@ async function outcome(hash: string, sender: string): Promise<any | null> {
   const until = Date.now() + 90_000;
   for (let i = 0; Date.now() < until; i++) {
     try {
-      return await (provider as any).viewTransactionStatus({ txHash: hash, accountId: sender, waitUntil: 'FINAL' });
+      return await timed((provider as any).viewTransactionStatus({ txHash: hash, accountId: sender, waitUntil: 'FINAL' }), 20_000, 'transaction status');
     } catch (e: any) {
       const msg = String(e?.message ?? e);
       // unknown after a while means it never landed (or expired); keep asking while the node is merely slow
@@ -219,7 +229,7 @@ async function heightOf(blockHash?: string): Promise<number> {
   if (!blockHash) return 0;
   for (let i = 0; i < 20; i++) {
     try {
-      const b = await provider.viewBlock({ blockId: blockHash });
+      const b = await timed(provider.viewBlock({ blockId: blockHash }), 8_000, 'block');
       seenHeight = Math.max(seenHeight, b.header.height);
       return b.header.height;
     } catch {
@@ -235,7 +245,7 @@ async function heightOf(blockHash?: string): Promise<number> {
 export async function view<T>(contract: string, method: string, args: Record<string, unknown> = {}): Promise<T> {
   for (let i = 0; ; i++) {
     try {
-      const r: any = await provider.callFunctionRaw({ contractId: contract, method, args, blockQuery: { finality: 'optimistic' } });
+      const r: any = await timed(provider.callFunctionRaw({ contractId: contract, method, args, blockQuery: { finality: 'optimistic' } }), 12_000, `view ${method}`);
       if (r.block_height >= seenHeight || i >= 20) return JSON.parse(Buffer.from(r.result).toString()) as T;
       await new Promise((ok) => setTimeout(ok, 250));
     } catch (e: any) {
@@ -247,13 +257,13 @@ export async function view<T>(contract: string, method: string, args: Record<str
 
 /** The chain's clock, in seconds. Deadlines are judged by block time, not the server's. */
 export async function chainNow(): Promise<number> {
-  const b = await provider.viewBlock({ finality: 'optimistic' });
+  const b = await timed(provider.viewBlock({ finality: 'optimistic' }), 8_000, 'chain time');
   return Math.floor(Number(b.header.timestamp) / 1e9);
 }
 
 export async function nearBalance(id: string): Promise<number> {
   try {
-    const a: any = await provider.viewAccount({ accountId: id, blockQuery: { finality: 'optimistic' } } as any);
+    const a: any = await timed(provider.viewAccount({ accountId: id, blockQuery: { finality: 'optimistic' } } as any), 10_000, 'account');
     return Number(BigInt(a.amount) / 10n ** 18n) / 1e6;
   } catch {
     return 0;
@@ -269,7 +279,7 @@ let room = { at: 0, near: Infinity };
 export async function bankRoom(): Promise<number> {
   if (!NEAR || Date.now() - room.at < 60_000) return room.near;
   try {
-    const a: any = await provider.viewAccount({ accountId: NEAR.bank, blockQuery: { finality: 'optimistic' } } as any);
+    const a: any = await timed(provider.viewAccount({ accountId: NEAR.bank, blockQuery: { finality: 'optimistic' } } as any), 10_000, 'account');
     const free = Number((BigInt(a.amount) - BigInt(a.storage_usage) * 10n ** 19n) / 10n ** 18n) / 1e6;
     room = { at: Date.now(), near: free };
     if (free < ROOM_WARN) console.warn(`bank: only ${free.toFixed(3)} NEAR left for storage; send NEAR to ${NEAR.bank}`);
@@ -297,7 +307,7 @@ export async function balanceOf(id: string): Promise<number> {
 /** Logs from a transaction someone else sent (a customer's wallet), with its outcome. */
 export async function txLogs(hash: string, sender: string): Promise<{ ok: boolean; logs: string[]; block: number } | null> {
   try {
-    const r: any = await (provider as any).viewTransactionStatus({ txHash: hash, accountId: sender, waitUntil: 'EXECUTED_OPTIMISTIC' });
+    const r: any = await timed((provider as any).viewTransactionStatus({ txHash: hash, accountId: sender, waitUntil: 'EXECUTED_OPTIMISTIC' }), 20_000, 'transaction status');
     const logs: string[] = r.receipts_outcome.flatMap((x: any) => x.outcome?.logs ?? []);
     const ok = !r.receipts_outcome.some((x: any) => x.outcome?.status?.Failure);
     return { ok, logs, block: await heightOf(r.receipts_outcome.at(-1)?.block_hash) };

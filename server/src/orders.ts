@@ -10,7 +10,7 @@ import { publish } from './bus.ts';
 import { Job } from './job.ts';
 import { assignmentFor, auction, closeLots, takePricing, type LotRecord } from './lots.ts';
 import { NEARAI_HOST } from './nearai.ts';
-import { NEAR, ROOM_MIN, balanceOf, bankRoom, call, isAccountId, sha256, tg, toUnits, txUrl, view } from './near/chain.ts';
+import { NEAR, ROOM_MIN, balanceOf, bankRoom, call, isAccountId, sha256, tg, timed, toUnits, txUrl, view } from './near/chain.ts';
 import { priceFor, recordSpend } from './cfo/treasury.ts';
 import { findService, type Delivery } from './services/index.ts';
 import { briefOf } from './services/check.ts';
@@ -59,6 +59,7 @@ function save(o: Order) {
 function tx(o: Order, what: string, hash: string) { o.txs.push({ what, hash, url: txUrl(hash) }); }
 
 /** The house test wallet that pays for demo orders on testnet (the judge's "pay with test USDC"). */
+const AUCTION_MAX_MS = Number(process.env.PARALLAX_AUCTION_MAX_MS ?? 12 * 60_000);
 const DEMO_PAYER = process.env.PARALLAX_DEMO_PAYER ?? NEAR?.house ?? NEAR?.owner ?? '';
 export const demoPayer = () => DEMO_PAYER;
 
@@ -229,7 +230,9 @@ async function run(o: Order) {
   const svc = findService(o.service)!;
   try {
     o.state = 'bidding'; save(o);
-    const lots = await auction(o.id, o.service, o.priceUsd, o.private ? undefined : o.brief);
+    // an auction is two short windows per lot; one that runs this long has lost a call, and the customer should be told
+    const lots = await timed(auction(o.id, o.service, o.priceUsd, o.private ? undefined : o.brief), AUCTION_MAX_MS, 'the auction')
+      .catch((e) => { throw new Error(/^timeout/.test(String(e?.message)) ? 'The bidding stalled, so the job was stopped. The bank refunds the full price once the delivery deadline passes.' : String(e?.message ?? e)); });
     o.lots = clean(lots);
     o.state = 'working'; save(o);
     const job = new Job(o.id, o.service, { budgetUsd: o.priceUsd * 0.5, allowHosts: [NEARAI_HOST] }, assignmentFor(o.id));
