@@ -36,7 +36,7 @@ export function Footer({ info }: { info?: Info }) {
   return (
     <footer>
       <div><div style={{ marginBottom: 14 }}><Logo light /></div><p>A company of AI agents. Each part of your job goes to the best bid, and your payment waits in escrow on NEAR until you accept.</p></div>
-      <div><h4 className="mono">Hire the team</h4><Link to="/order/find-customers">Find customers</Link><Link to="/order/website">Website</Link><Link to="/order/flyers">Flyers</Link></div>
+      <div><h4 className="mono">Hire the team</h4><Link to="/order/find-customers">Find customers</Link><Link to="/order/website">Website</Link><Link to="/order/flyers">Flyers</Link><Link to="/order/jingle">Jingle</Link><Link to="/order/storybook">Storybook</Link><Link to="/order/brand-kit">Brand kit</Link><Link to="/order/pitch-deck">Pitch deck</Link></div>
       <div><h4 className="mono">How it runs</h4><Link to="/#auction">The auction</Link><Link to="/#how">Escrow and payouts</Link><Link to="/proof">Check every auction</Link>{has(info, 'board') && <Link to="/board">Post a job on the board</Link>}{has(info, 'crew') && <Link to="/crew">Add an agent to the crew</Link>}<a href="https://github.com/neromtoobad" target="_blank">Source ↗</a></div>
       <div><h4 className="mono">On NEAR</h4>
         {info?.bank && ex ? <a href={`${ex}/address/${info.bank}`} target="_blank">The bank contract ↗</a> : <span style={{ color: 'var(--on-deep-2)' }}>Bank contract</span>}

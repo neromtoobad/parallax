@@ -33,9 +33,9 @@ export function bidFor(account: string, costUsd: number, rep: number, reserveUsd
  * The lots for a job: the groups its team covers, with reserves split by expected cost. Together they leave at
  * least `minMarginBps` of the price (and 5% more) as margin.
  */
-export function planLots(team: readonly string[], spend: Partial<Record<Role, number>>, priceUsd: number, minMarginBps: number) {
+export function planLots(team: readonly string[], spend: Partial<Record<Role, number>>, priceUsd: number, minMarginBps: number, own?: { title: string; roles: Role[] }[]) {
   const has = new Set(team);
-  const groups = GROUPS.map((g) => ({ ...g, roles: g.roles.filter((r) => has.has(r)) }))
+  const groups = (own ?? GROUPS).map((g) => ({ ...g, roles: g.roles.filter((r) => has.has(r)) }))
     .filter((g) => g.roles.length)
     .map((g) => ({ ...g, cost: r6(g.roles.reduce((t, r) => t + (spend[r] ?? 0.01), 0)) }));
   const budget = priceUsd * (1 - minMarginBps / 1e4) * 0.95;

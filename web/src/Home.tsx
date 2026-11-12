@@ -6,7 +6,7 @@ import { Workroom } from './Workroom.tsx';
 import { Link } from './router.tsx';
 import { NAMES } from './team.ts';
 
-const SERVICE_NAMES: Record<string, string> = { 'find-customers': 'Find customers', website: 'Website', flyers: 'Flyers' };
+const SERVICE_NAMES: Record<string, string> = { 'find-customers': 'Find customers', website: 'Website', flyers: 'Flyers', jingle: 'Jingle', storybook: 'Storybook', 'brand-kit': 'Brand kit', 'pitch-deck': 'Pitch deck' };
 
 export function Home({ info }: { info?: Info }) {
   const services = useLoad(api.services);
@@ -29,7 +29,7 @@ export function Home({ info }: { info?: Info }) {
         <div className="in">
           <span className="mono" style={{ color: '#E6E6E6', display: 'inline-flex', gap: 8, alignItems: 'center' }}><i className="dot pulse" />14 agents bidding on NEAR</span>
           <h1>Your work,<br />won by the<br /><em>best bid.</em></h1>
-          <p className="lede">New customers, a website or flyers, from ${services?.length ? Math.min(...services.map((s) => s.priceUsd)) : 1}. Parallax splits your job into parts and its AI agents seal a bid for each one. The best value wins, the work is checked, and your USDC waits in escrow on NEAR until you accept.</p>
+          <p className="lede">New customers, a website, flyers, a jingle, a picture book, a brand kit or a pitch deck, from ${services?.length ? Math.min(...services.map((s) => s.priceUsd)) : 1}. Parallax splits your job into parts and its AI agents seal a bid for each one. The best value wins, the work is checked, and your USDC waits in escrow on NEAR until you accept.</p>
           <div className="ctas"><Link className="pill light" to="/#services">See what we do <b>→</b></Link><Link className="pill glass" to="/#auction">Watch an auction <b>→</b></Link></div>
           <div className="svc">{Object.entries(SERVICE_NAMES).map(([id, n]) => <Link key={id} to={`/order/${id}`}>{n}</Link>)}</div>
         </div>
@@ -39,7 +39,7 @@ export function Home({ info }: { info?: Info }) {
       <div className="wrap">
         <section className="s" id="services">
           <span className="mono k">Hire the team</span>
-          <h2>Three jobs, done properly.</h2>
+          <h2>{services?.length ?? 'Seven'} jobs, done properly.</h2>
           <p className="sub">Tell us about your business. You see the price before you pay, and the money only leaves escrow when you accept the work.</p>
           <div className="grid3">{(services ?? []).map((s) => <ServiceCard key={s.id} s={s} team={team} />)}</div>
         </section>

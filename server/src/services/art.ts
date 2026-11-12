@@ -32,3 +32,13 @@ export function placeholder(p: Palette) {
 }
 
 export const esc = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/** A picture as a file for the delivery: a data URL becomes bytes and a name; a plain URL stays a link. */
+export function asFile(src: string, name: string): { ref: string; file?: { name: string; data: Buffer } } {
+  const m = /^data:image\/(png|jpeg|svg\+xml);base64,(.*)$/.exec(src);
+  if (!m) return { ref: src };
+  const data = Buffer.from(m[2], 'base64');
+  // the label can be wrong (FLUX sends JPEG bytes as image/png), so the bytes decide
+  const ext = data[0] === 0xff && data[1] === 0xd8 ? 'jpg' : data[0] === 0x89 && data[1] === 0x50 ? 'png' : 'svg';
+  return { ref: `${name}.${ext}`, file: { name: `${name}.${ext}`, data } };
+}

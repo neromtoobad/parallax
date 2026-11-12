@@ -28,7 +28,7 @@ export type Order = {
   delivery?: {
     summary: string; check: { pass: boolean; notes: string[] };
     leads?: Lead[]; email?: { subject: string; body: string }; csv?: string;
-    site?: { path: string }; flyers?: { name: string; svg: string; w: number; h: number }[]; doc?: { title: string; markdown: string };
+    site?: { path: string }; audio?: { path: string; sha256: string; seconds: number }; files?: { name: string; sha256?: string }[]; flyers?: { name: string; svg: string; w: number; h: number }[]; doc?: { title: string; markdown: string };
     factcheck?: { issues: { claim: string; problem: string; fix: string }[]; verdict: string };
   };
   error?: string;

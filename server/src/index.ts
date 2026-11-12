@@ -228,6 +228,15 @@ app.get('/sites/:id/', (c) => {
   const f = sitePath(c.req.param('id'));
   return /^[a-z0-9]+$/.test(c.req.param('id')) && existsSync(f) ? c.html(readFileSync(f, 'utf8')) : c.notFound();
 });
+// Files a delivery made beside its page (a jingle's song.wav, a deck's slides), by name only.
+const FILE_TYPES: Record<string, string> = { wav: 'audio/wav', png: 'image/png', jpg: 'image/jpeg', svg: 'image/svg+xml', pdf: 'application/pdf', html: 'text/html; charset=utf-8' };
+app.get('/sites/:id/:file', (c) => {
+  const id = c.req.param('id'), file = c.req.param('file');
+  if (!/^[a-z0-9]+$/.test(id) || !/^[a-z0-9-]+\.[a-z]+$/.test(file)) return c.notFound();
+  const f = sitePath(id, file), type = FILE_TYPES[file.split('.').pop()!];
+  if (!type || !existsSync(f)) return c.notFound();
+  return new Response(readFileSync(f), { headers: { 'content-type': type, 'cache-control': 'public, max-age=86400' } });
+});
 
 // The site (built web app), with the single-page fallback.
 if (existsSync(WEB_DIR)) {

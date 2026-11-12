@@ -4,7 +4,7 @@
 // run in memory.
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { DATA_DIR, DRY } from './config.ts';
 import { publish } from './bus.ts';
 import { Job } from './job.ts';
@@ -272,13 +272,19 @@ const clean = (lots: LotRecord[]) => lots.map(({ salts, outside, cost, commitEnd
 
 /** A built website is written to disk and served at /sites/<id>/; the order keeps just its address. */
 function strip(id: string, d: Delivery) {
-  if (!d.site) return d;
+  if (!d.site && !d.audio?.wav && !d.files?.length) return d;
   const at = join(DATA_DIR, 'sites', id);
   mkdirSync(at, { recursive: true });
-  writeFileSync(join(at, 'index.html'), d.site.html);
-  return { ...d, site: { path: d.site.path } };
+  if (d.site) writeFileSync(join(at, 'index.html'), d.site.html);
+  if (d.audio?.wav) writeFileSync(join(at, 'song.wav'), d.audio.wav);
+  for (const f of d.files ?? []) if (f.data && /^[a-z0-9-]+\.[a-z]+$/.test(f.name)) writeFileSync(join(at, f.name), f.data);
+  const { wav, ...audio } = d.audio ?? ({} as NonNullable<Delivery['audio']>);
+  void wav;
+  const { files, ...rest } = d;
+  return { ...rest, ...(d.site ? { site: { path: d.site.path } } : {}), ...(d.audio ? { audio } : {}), ...(files?.length ? { files: files.map((f) => ({ name: f.name, sha256: f.data ? sha256Buf(f.data) : f.sha256 })) } : {}) } as Delivery;
 }
-export const sitePath = (id: string) => join(DATA_DIR, 'sites', id, 'index.html');
+const sha256Buf = (b: Buffer) => createHash('sha256').update(b).digest('hex');
+export const sitePath = (id: string, file = 'index.html') => join(DATA_DIR, 'sites', id, file);
 
 /** The customer accepts: the bank pays each lot's winner and keeps its margin. */
 export async function accept(o: Order, txHash?: string) {
