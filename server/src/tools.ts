@@ -70,6 +70,15 @@ export async function llmJson<T>(job: Job, agent: Role, o: Parameters<typeof llm
 
 /** One picture, as a PNG data URL. `dry` is an SVG placeholder in demo mode. */
 export async function picture(job: Job, agent: Role, o: { prompt: string; reason: string; size?: string; dry: () => string }): Promise<string> {
+  try { return await paint(job, agent, o); } catch (e: any) {
+    // the image model sometimes refuses or drops a long prompt: one more try with a shorter, plainer one
+    if (/budget|allowlist|holds .* USDC/.test(String(e?.message))) throw e;
+    job.log(agent, 'retry', 'The picture failed, trying a simpler prompt');
+    return paint(job, agent, { ...o, prompt: `${o.prompt.split(/(?<=\.)\s/).slice(0, 2).join(' ').slice(0, 300)} Illustration, no text.`, reason: `${o.reason} (retry)` });
+  }
+}
+
+async function paint(job: Job, agent: Role, o: { prompt: string; reason: string; size?: string; dry: () => string }): Promise<string> {
   const style = crewSpec(job.payer(agent))?.style;
   const data = await buy<any>(job, {
     agent, vendor: 'NEAR AI Cloud', url: `${NEARAI}/images/generations`, reason: o.reason,

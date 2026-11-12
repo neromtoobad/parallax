@@ -8,7 +8,7 @@ import { board } from './board.ts';
 import { factcheck } from './factcheck.ts';
 import { flyers } from './flyers.ts';
 import { website } from './website.ts';
-import { jingle } from './jingle.ts';
+import { invite } from './invite.ts';
 import { storybook } from './storybook.ts';
 import { brandkit } from './brandkit.ts';
 import { deck } from './deck.ts';
@@ -42,9 +42,9 @@ export type Service = {
   run(job: Job, input: Record<string, string>): Promise<Delivery>;
 };
 
-export const SERVICES: Service[] = [findCustomers, website, flyers, jingle, storybook, brandkit, deck, comic, arcade];
+export const SERVICES: Service[] = [findCustomers, website, flyers, invite, storybook, brandkit, deck, comic, arcade];
 // Mainnet runs on a small float, so its list prices are lower; testnet keeps the full ones.
-const MAINNET_PRICES: Record<string, number> = { flyers: 1, 'find-customers': 2, website: 3, jingle: 2, storybook: 2, 'brand-kit': 2, 'pitch-deck': 3, comic: 2, arcade: 2 };
+const MAINNET_PRICES: Record<string, number> = { flyers: 1, 'find-customers': 2, website: 3, invitation: 2, storybook: 2, 'brand-kit': 2, 'pitch-deck': 3, comic: 2, arcade: 2 };
 if (NEAR?.network === 'mainnet') for (const s of SERVICES) s.priceUsd = MAINNET_PRICES[s.id] ?? s.priceUsd;
 // Board jobs and sub-jobs aren't on the menu: they come in through the bank, priced by whoever posts them.
 export const findService = (id: string) => SERVICES.find((s) => s.id === id) ?? [board, factcheck].find((s) => s.id === id);

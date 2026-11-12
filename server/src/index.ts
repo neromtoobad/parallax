@@ -228,8 +228,8 @@ app.get('/sites/:id/', (c) => {
   const f = sitePath(c.req.param('id'));
   return /^[a-z0-9]+$/.test(c.req.param('id')) && existsSync(f) ? c.html(readFileSync(f, 'utf8')) : c.notFound();
 });
-// Files a delivery made beside its page (a jingle's song.wav, a deck's slides), by name only.
-const FILE_TYPES: Record<string, string> = { wav: 'audio/wav', png: 'image/png', jpg: 'image/jpeg', svg: 'image/svg+xml', pdf: 'application/pdf', html: 'text/html; charset=utf-8' };
+// Files a delivery made beside its page (pictures, logos, an invitation's calendar file), by name only.
+const FILE_TYPES: Record<string, string> = { wav: 'audio/wav', png: 'image/png', jpg: 'image/jpeg', svg: 'image/svg+xml', pdf: 'application/pdf', ics: 'text/calendar; charset=utf-8', html: 'text/html; charset=utf-8' };
 app.get('/sites/:id/:file', (c) => {
   const id = c.req.param('id'), file = c.req.param('file');
   if (!/^[a-z0-9]+$/.test(id) || !/^[a-z0-9-]+\.[a-z]+$/.test(file)) return c.notFound();

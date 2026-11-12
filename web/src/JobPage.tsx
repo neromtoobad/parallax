@@ -7,7 +7,7 @@ import { Link } from './router.tsx';
 import { nameOf } from './team.ts';
 import { acceptJob, rejectJob, useWallet } from './wallet.ts';
 
-const NAMES: Record<string, string> = { 'find-customers': 'Find customers', website: 'Website', flyers: 'Flyers', jingle: 'Jingle', storybook: 'Storybook', 'brand-kit': 'Brand kit', 'pitch-deck': 'Pitch deck', comic: 'Comic strip', arcade: 'Arcade game', board: 'Board job', factcheck: 'Fact check' };
+const NAMES: Record<string, string> = { 'find-customers': 'Find customers', website: 'Website', flyers: 'Flyers', invitation: 'Invitation', storybook: 'Storybook', 'brand-kit': 'Brand kit', 'pitch-deck': 'Pitch deck', comic: 'Comic strip', arcade: 'Arcade game', board: 'Board job', factcheck: 'Fact check' };
 const FLOW = ['funded', 'bidding', 'working', 'delivered', 'accepted'] as const;
 const FLOW_LABEL: Record<string, string> = { funded: 'Paid into escrow', bidding: 'Auction', working: 'Work', delivered: 'Delivered', accepted: 'Accepted · paid out' };
 const KIND: Record<string, string> = { start: 'started', done: 'done', note: 'note', search: 'searched', pass: 'passed it', fail: 'failed it', error: 'error', retry: 'retrying', hire: 'hired' };
@@ -133,7 +133,6 @@ function Delivery({ o }: { o: Order }) {
         <iframe className="frame" src={d.site.path} title={NAMES[o.service] ?? 'The work'} />
         <p style={{ marginTop: 12 }}><a className="ghost" href={d.site.path} target="_blank">{o.service === 'website' ? 'Open the site' : `Open the ${(NAMES[o.service] ?? 'work').toLowerCase()}`} ↗</a></p>
       </>}
-      {d.audio && <p className="note" style={{ marginTop: 8 }}>Played from the producer's TEE-signed score, so anyone can render it again and get the same file · <a href={d.audio.path} download>WAV, {Math.round(d.audio.seconds)} s</a> · sha256 <span className="mono">{d.audio.sha256.slice(0, 16)}…</span></p>}
       {d.files && d.files.some((f) => f.name.endsWith('.svg')) && <p className="note" style={{ marginTop: 8 }}>Files: {d.files.filter((f) => f.name.endsWith('.svg')).map((f, i) => <span key={f.name}>{i ? ' · ' : ''}<a href={`/sites/${o.id}/${f.name}`} download>{f.name}</a></span>)}</p>}
       {d.doc && <Doc doc={d.doc} />}
       {d.factcheck && (
