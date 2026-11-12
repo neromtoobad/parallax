@@ -10,7 +10,7 @@ export function OrderPage({ id, info }: { id: string; info?: Info }) {
   const [quote, setQuote] = useState<Order>();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const [payer, setPayer] = useState<'house' | 'own' | 'chain'>('house');
+  const [payer, setPayer] = useState<'own' | 'chain'>('own');
   const [balance, setBalance] = useState<number>();
   const wallet = useWallet(info);
   const demo = info?.mode === 'demo';
@@ -70,13 +70,12 @@ export function OrderPage({ id, info }: { id: string; info?: Info }) {
             <div className="f">
               <span>Who pays</span>
               <div className="seg">
-                <button className={payer === 'house' ? 'on' : ''} onClick={() => setPayer('house')}>The house wallet <em>free to try</em></button>
                 <button className={payer === 'own' ? 'on' : ''} onClick={() => setPayer('own')}>My NEAR wallet <em>{info?.mode === 'mainnet' ? 'real USDC' : 'test USDC'}</em></button>
                 {info?.mode === 'mainnet' && <button className={payer === 'chain' ? 'on' : ''} onClick={() => setPayer('chain')}>Another chain <em>via NEAR Intents</em></button>}
               </div>
               {payer === 'chain' && (
                 <p className="note" style={{ marginTop: 8 }}>
-                  Pay with USDC, USDT, ETH, SOL or BTC from Ethereum, Base, Arbitrum, Solana or Bitcoin. NEAR Intents swaps it and sends exactly the price as USDC into the bank's escrow for this job. The house wallet accepts the work for you{wallet.account ? <>, or you do from <b className="mono">{wallet.account}</b></> : ''}.
+                  Pay with USDC, USDT, ETH, SOL or BTC from Ethereum, Base, Arbitrum, Solana or Bitcoin. NEAR Intents swaps it and sends exactly the price as USDC into the bank's escrow for this job. Parallax accepts the work for you{wallet.account ? <>, or you do from <b className="mono">{wallet.account}</b></> : ''}.
                 </p>
               )}
               {payer === 'own' && (
