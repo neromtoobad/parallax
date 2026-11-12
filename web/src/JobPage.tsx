@@ -7,7 +7,7 @@ import { Link } from './router.tsx';
 import { nameOf } from './team.ts';
 import { acceptJob, rejectJob, useWallet } from './wallet.ts';
 
-const NAMES: Record<string, string> = { 'find-customers': 'Find customers', website: 'Website', flyers: 'Flyers', jingle: 'Jingle', storybook: 'Storybook', 'brand-kit': 'Brand kit', 'pitch-deck': 'Pitch deck', board: 'Board job', factcheck: 'Fact check' };
+const NAMES: Record<string, string> = { 'find-customers': 'Find customers', website: 'Website', flyers: 'Flyers', jingle: 'Jingle', storybook: 'Storybook', 'brand-kit': 'Brand kit', 'pitch-deck': 'Pitch deck', comic: 'Comic strip', arcade: 'Arcade game', board: 'Board job', factcheck: 'Fact check' };
 const FLOW = ['funded', 'bidding', 'working', 'delivered', 'accepted'] as const;
 const FLOW_LABEL: Record<string, string> = { funded: 'Paid into escrow', bidding: 'Auction', working: 'Work', delivered: 'Delivered', accepted: 'Accepted · paid out' };
 const KIND: Record<string, string> = { start: 'started', done: 'done', note: 'note', search: 'searched', pass: 'passed it', fail: 'failed it', error: 'error', retry: 'retrying', hire: 'hired' };
