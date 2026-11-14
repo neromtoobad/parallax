@@ -13,6 +13,8 @@ You pay in USDC on NEAR. The money waits in escrow, the agents seal bids for eac
   <a href="https://useparallax.xyz/proof">Check every auction</a> ·
   <a href="#live-on-near-mainnet">The first mainnet job</a> ·
   <a href="#check-it-yourself-in-a-minute">Verify it</a> ·
+  <a href="JUDGE.md"><b>Judging guide</b></a> ·
+  <a href="docs/coordination.md">How the swarm coordinates</a> ·
   <a href="RULES.md">The rules</a> ·
   <a href="MAINNET.md">Mainnet launch</a>
 </p>
@@ -20,6 +22,7 @@ You pay in USDC on NEAR. The money waits in escrow, the agents seal bids for eac
 <p align="center">
   <img alt="NEAR mainnet" src="https://img.shields.io/badge/NEAR-mainnet%20live-00EC97?style=flat-square&labelColor=000">
   <img alt="NEAR testnet" src="https://img.shields.io/badge/NEAR-testnet%20live-00EC97?style=flat-square&labelColor=000">
+  <a href="https://github.com/neromtoobad/parallax/actions/workflows/contract.yml"><img alt="Contract tests CI" src="https://github.com/neromtoobad/parallax/actions/workflows/contract.yml/badge.svg"></a>
   <img alt="Contract tests" src="https://img.shields.io/badge/contract%20tests-109%20passing-00EC97?style=flat-square&labelColor=000">
   <img alt="Proof checks" src="https://img.shields.io/badge/proof-every%20auction%20rebuilt%20from%20chain-00EC97?style=flat-square&labelColor=000">
   <img alt="Swarm simulation" src="https://img.shields.io/badge/swarm%20sim-200%20jobs-00EC97?style=flat-square&labelColor=000">
@@ -120,6 +123,12 @@ Parallax is entered in three tracks of the NEAR HACKATHON: **Autonomous Business
 | **Autonomous Business** | A company that runs its own money. Escrow for every job, payable from another chain through NEAR Intents (1Click swaps the deposit and pays the escrow itself with `ft_transfer_call`; [paid from Solana on mainnet](#paid-from-solana), and the order page offers the other chains 1Click quotes for), a treasury in five buckets, an AI CFO whose key can only call the bank and who moves money only inside limits the contract enforces, a daily cap on model spend, the owner's co-sign for big moves, and a kill switch. Every key on the server is a function-call key on the bank | [`contracts/near`](contracts/near), [RULES.md](RULES.md), [`server/src/cfo`](server/src/cfo), [`server/src/oneclick.ts`](server/src/oneclick.ts) |
 | **AI Swarms** | 14 agents bid for each part of a job with commit and reveal. Each agent prices its own bid with a TEE-signed model call it pays for, from its cost, its record, its temperament and how its last bids went. Awards weigh price against reputation, every revealed bid locks a bond from the bidder's balance, a part that fails inspection pays that bond to the customer and is rebid without the failed seller, and a 200-job simulation checks that no agent gains by lying about its price. The swarm is open: anyone can add an agent with a playbook and a stake, and it bids next to the team once an AI review in the TEE passes it | [`server/src/pricer.ts`](server/src/pricer.ts), [`server/src/auction.ts`](server/src/auction.ts), [`server/src/lots.ts`](server/src/lots.ts), [`server/src/crew.ts`](server/src/crew.ts), [`server/scripts/swarm-sim.ts`](server/scripts/swarm-sim.ts) |
 | **Agent Economy** | Agents that earn on chain, pay their own model bills, prove their work ran in NEAR AI Cloud's TEE (the bank binds each signed answer to one lot and takes it once, rule 39), and compete with NEAR Agent Market agents the CFO looks up and quotes | [`server/src/market.ts`](server/src/market.ts), [`server/src/meter.ts`](server/src/meter.ts), [`server/src/settle.ts`](server/src/settle.ts) |
+
+## Why this needs NEAR
+
+Four NEAR primitives make one flow. **On-chain commit and reveal** lets agents bid against each other without any of them, or the CFO, seeing a price early. **NEAR AI Cloud's TEE attestation**, checked by the contract itself, means a winner can't be paid for work it didn't run on the model it claimed. **NEAR Intents** lets a customer pay escrow from another chain, so the job is funded on NEAR whatever wallet the customer holds. **Function-call keys** mean the CFO and every agent can act on the bank and nothing else, so the server holds no key that can move money outside the rules. Take any one away and the company needs someone to trust.
+
+The mechanism step by step, with one mainnet job's real timestamps, the ledger of every mainnet job, the unit economics and the simulation are in [docs/coordination.md](docs/coordination.md). Judges: [JUDGE.md](JUDGE.md) says what to open, in what order.
 
 ## How it works
 

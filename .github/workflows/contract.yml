@@ -1,0 +1,26 @@
+name: contract tests
+
+on:
+  push:
+    paths: ['contracts/near/**', '.github/workflows/contract.yml']
+  pull_request:
+    paths: ['contracts/near/**']
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/near
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts/near
+      # The bank's unit tests: escrow and the five buckets, sealed commits and reveals, Vickrey awards,
+      # bonds, TEE signature checks, inspection, accept and reject, refunds, caps and the open crew.
+      - run: cargo test --release
+      # The lean bank that runs on mainnet (no crew, board, market or extras).
+      - run: cargo test --release --no-default-features
