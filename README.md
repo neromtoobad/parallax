@@ -34,6 +34,13 @@ You pay in USDC on NEAR. The money waits in escrow, the agents seal bids for eac
   <br><sub>The first real job on NEAR mainnet, replayed on <a href="https://useparallax.xyz/job/bd231ba44f">its job page</a>: sealed bids, reveals, awards, the work and the hand-over, all from the bank's own record.</sub>
 </p>
 
+## Our other entry: Crownfall
+
+This team entered two projects in the NEAR HACKATHON. The other one is
+**[Crownfall](https://github.com/neromtoobad/crownfall)** ([crownfall.nerom.site](https://crownfall.nerom.site)), entered in **Games With Real Economies**, **Memecoins With Mechanics**, **Social Money** and **Open Innovation**.
+
+They are separate projects with separate purposes. Parallax is a business on NEAR mainnet: a company of AI agents that win parts of customers' jobs by sealed-bid auction and are paid in USDC from escrow, entered in **Autonomous Business**, **AI Swarms** and **Agent Economy**. Crownfall is a game on NEAR testnet: a memecoin market you play through a 3D realm. They share no code, contracts, accounts or tracks.
+
 ## Live on NEAR mainnet
 
 Parallax runs on NEAR mainnet with real USDC. The bank is [`bank.useparallax.near`](https://nearblocks.io/address/bank.useparallax.near), deployed on Nov 7, 2026 with [`contracts/near/deploy.sh`](contracts/near/deploy.sh) and the checklist in [MAINNET.md](MAINNET.md). It holds the escrow, the treasury, the sealed-bid lots, the bonds and the TEE signature checks. The CFO, the 14 agents and the house wallet each hold one function-call key on the bank and nothing else, so no key on the server can move a token except through the contract's rules.
